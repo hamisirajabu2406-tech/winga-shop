@@ -1,0 +1,74 @@
+[
+  {
+    "id": 1,
+    "name": "MAPIZO",
+    "phone": "0745423403",
+    "password": "22334455",
+    "status": "active",
+    "expiryDate": "2026-11-05T06:58:09.156Z",
+    "dateAdded": "2026-08-06T20:59:18.849Z"
+  },
+  {
+    "id": 3,
+    "name": "sam",
+    "phone": "0711111111",
+    "password": "123456",
+    "status": "suspended",
+    "expiryDate": "2026-09-06T07:00:03.926Z",
+    "dateAdded": "2026-08-07T07:00:03.926Z"
+  },
+  {
+    "id": 4,
+    "name": "NERRY OUTFITS STORE",
+    "phone": "0683316568",
+    "password": "123456",
+    "status": "suspended",
+    "expiryDate": "2026-09-06T11:01:36.651Z",
+    "dateAdded": "2026-08-07T11:01:36.651Z"
+  },
+  {
+    "id": 5,
+    "name": "Abby",
+    "phone": "0784295551",
+    "password": "123456",
+    "status": "suspended",
+    "expiryDate": "2026-09-06T17:24:22.480Z",
+    "dateAdded": "2026-08-07T17:24:22.481Z"
+  },
+  {
+    "id": 6,
+    "name": "Hamisi",
+    "phone": "0692646637",
+    "password": "123456",
+    "status": "active",
+    "expiryDate": "2026-09-06T21:34:57.129Z",
+    "dateAdded": "2026-08-07T21:34:57.129Z"
+  },
+  {
+    "id": 7,
+    "name": "Tatu Rajabu",
+    "phone": "0681156403",
+    "password": "123456",
+    "status": "active",
+    "expiryDate": "2026-09-06T23:28:30.293Z",
+    "dateAdded": "2026-08-07T23:28:30.293Z"
+  },
+  {
+    "id": 8,
+    "name": "Tatu",
+    "phone": "0743567896",
+    "password": "123456",
+    "status": "suspended",
+    "expiryDate": "2026-09-07T07:19:21.251Z",
+    "dateAdded": "2026-08-08T07:19:21.251Z"
+  },
+  {
+    "id": 9,
+    "name": "Ally",
+    "phone": "0774223403",
+    "password": "123456",
+    "status": "active",
+    "expiryDate": "2026-09-07T07:58:37.660Z",
+    "dateAdded": "2026-08-08T07:58:37.660Z"
+  }
+]

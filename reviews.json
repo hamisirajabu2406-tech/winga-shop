@@ -1,0 +1,26 @@
+[
+  {
+    "orderId": 1,
+    "rating": 3,
+    "comment": "discount",
+    "date": "2026-08-04T23:43:31.170Z"
+  },
+  {
+    "orderId": 10,
+    "rating": 5,
+    "comment": "mzigo upo vizuri kama kwenye picha",
+    "date": "2026-08-07T21:43:25.873Z"
+  },
+  {
+    "orderId": 2,
+    "rating": 5,
+    "comment": "toa discount",
+    "date": "2026-08-14T16:50:16.102Z"
+  },
+  {
+    "orderId": 11,
+    "rating": 5,
+    "comment": "Bidhaa nzuri sana nitanunuwa tena kwako boss",
+    "date": "2026-08-22T14:36:19.090Z"
+  }
+]

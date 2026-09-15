@@ -1,0 +1,80 @@
+[
+  {
+    "id": 2,
+    "wingaId": 4,
+    "name": "SILK DRESS",
+    "category": "DRESS",
+    "buyingPrice": 18000,
+    "sellingPrice": 25000,
+    "price": 25000,
+    "size": "Standard",
+    "imageUrl": "/uploads/1786108146947-763443872.jpg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786108146947-763443872.jpg",
+    "dateAdded": "2026-08-07T13:09:07.033Z"
+  },
+  {
+    "id": 3,
+    "wingaId": 1,
+    "name": "Boyfriend Jeans",
+    "category": "Jeans",
+    "buyingPrice": 16000,
+    "sellingPrice": 24000,
+    "price": 24000,
+    "size": "Standard",
+    "imageUrl": "/uploads/1786114763439-830313126.jpeg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786114763439-830313126.jpeg",
+    "dateAdded": "2026-08-07T14:59:23.447Z"
+  },
+  {
+    "id": 4,
+    "wingaId": 4,
+    "name": "Boyfriend Jeans",
+    "category": "Jeans",
+    "buyingPrice": 10000,
+    "sellingPrice": 18000,
+    "price": 18000,
+    "size": "Standard",
+    "imageUrl": "/uploads/1786119833489-979421680.jpeg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786119833489-979421680.jpeg",
+    "dateAdded": "2026-08-07T16:23:53.513Z"
+  },
+  {
+    "id": 6,
+    "wingaId": 6,
+    "name": "Boyfriend Jeans",
+    "category": "Jeans",
+    "buyingPrice": 16000,
+    "sellingPrice": 25000,
+    "price": 25000,
+    "size": "XL",
+    "imageUrl": "/uploads/1786138618681-724517356.jpeg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786138618681-724517356.jpeg",
+    "dateAdded": "2026-08-07T21:36:58.817Z"
+  },
+  {
+    "id": 7,
+    "wingaId": 9,
+    "name": "Boyfriend Jeans",
+    "category": "Jeans",
+    "buyingPrice": 13000,
+    "sellingPrice": 25000,
+    "price": 25000,
+    "size": "XL",
+    "imageUrl": "/uploads/1786176029192-15037897.jpeg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786176029192-15037897.jpeg",
+    "dateAdded": "2026-08-08T08:00:29.220Z"
+  },
+  {
+    "id": 8,
+    "wingaId": 1,
+    "name": "SILK DRESS",
+    "category": "DRESS",
+    "buyingPrice": 15000,
+    "sellingPrice": 22000,
+    "price": 22000,
+    "size": "Standard",
+    "imageUrl": "/uploads/1786653326797-473279051.jpg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786653326797-473279051.jpg",
+    "dateAdded": "2026-08-13T20:35:27.002Z"
+  }
+]

@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "name": "Sam Mapizo",
+    "phone": "0745423403",
+    "password": "22334455",
+    "status": "active",
+    "expiryDate": "2026-09-13T10:31:05.754Z",
+    "dateAdded": "2026-08-14T10:31:05.754Z"
+  },
+  {
+    "id": 2,
+    "name": "Ally",
+    "phone": "0692646637",
+    "password": "$2b$10$CfTOJA5ofolzFBh.z/iZ7OYWrHKuSIMs51Q1quZ/rRVYLtmmhBKBG",
+    "status": "suspended",
+    "expiryDate": "2026-11-12T16:39:39.096Z",
+    "dateAdded": "2026-08-14T16:39:39.097Z"
+  },
+  {
+    "id": 3,
+    "name": "Winga",
+    "phone": "0774223403",
+    "password": "$2b$10$K93nHP1J47biWv4HbpOtROPeBakkpsk28c1XqLiyLmRLbEIQxolVG",
+    "status": "suspended",
+    "expiryDate": "2026-09-15T08:32:17.027Z",
+    "dateAdded": "2026-08-16T08:32:17.028Z"
+  },
+  {
+    "id": 4,
+    "name": "HAMISI",
+    "phone": "0745423403",
+    "password": "$2b$10$4damLi2Rhp38usL6ALJ/C.wa1AQ8hjhXphHLTHH2YXM4pVGAT37Ze",
+    "status": "suspended",
+    "expiryDate": "2026-09-18T17:27:34.550Z",
+    "dateAdded": "2026-08-19T17:27:34.550Z"
+  },
+  {
+    "id": 5,
+    "name": "ANICETH",
+    "phone": "0673245125",
+    "password": "$2b$10$7He3p1ShKnYx/cpGalYJ/.BPnw/0X/1Q2eWI9GlVtMYLy6MaFUwte",
+    "status": "active",
+    "expiryDate": "2026-09-18T17:35:50.768Z",
+    "dateAdded": "2026-08-19T17:35:50.768Z"
+  },
+  {
+    "id": 6,
+    "name": "NERRY OUTFITS STORE",
+    "phone": "0683316568",
+    "password": "$2b$10$YVxRsp8TE.CfEblhHW9iA.QZxS1w3eY41li866N759ug8ZHaKjqvy",
+    "status": "active",
+    "expiryDate": "2026-09-21T12:33:26.460Z",
+    "dateAdded": "2026-08-22T12:33:26.460Z"
+  }
+]

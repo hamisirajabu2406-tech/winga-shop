@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Winga Shop — WhatsApp E-Commerce Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans">
+
+    <!-- Header / Navigation -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl font-black text-green-600">Winga<span class="text-gray-900">Shop</span></span>
+            </div>
+            <div class="flex items-center gap-3">
+                <!-- Seller Login Button -->
+                <a href="/login" class="px-4 py-2 text-sm font-semibold text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition">
+                    Seller Login
+                </a>
+                <!-- Superadmin Login Button -->
+                <a href="/superadmin" class="px-4 py-2 text-sm font-semibold text-white bg-gray-900 rounded-lg hover:bg-gray-800 transition">
+                    Admin Portal
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="bg-gradient-to-b from-green-900 to-green-800 text-white py-16 px-4 text-center">
+        <div class="max-w-4xl mx-auto">
+            <span class="bg-green-700 text-green-200 text-xs uppercase font-bold tracking-wider px-3 py-1 rounded-full">
+                WhatsApp Commerce Automated
+            </span>
+            <h1 class="text-4xl sm:text-5xl font-extrabold mt-4 mb-6 leading-tight">
+                Turn Your WhatsApp Into an Automated 24/7 Store
+            </h1>
+            <p class="text-lg text-green-100 max-w-2xl mx-auto mb-8">
+                WingaShop connects seller products directly to customers over WhatsApp with zero hassle, no password signups, and automated stock management.
+            </p>
+            <div class="flex flex-wrap justify-center gap-4">
+                <a href="/login" class="px-6 py-3 font-bold bg-green-500 text-white rounded-xl shadow-lg hover:bg-green-400 transition">
+                    Seller Dashboard
+                </a>
+                <a href="#how-it-works" class="px-6 py-3 font-bold bg-white/10 text-white rounded-xl hover:bg-white/20 transition">
+                    Learn How It Works
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 1: For Winga (Sellers) -->
+    <section id="how-it-works" class="py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center mb-12">
+            <h2 class="text-3xl font-bold text-gray-900">How WingaShop Empowers Sellers</h2>
+            <p class="text-gray-600 mt-2">Stop taking manual orders. Let the platform handle sales for you.</p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-8">
+            <!-- Benefit 1 -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                <div class="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center font-bold text-xl mb-4">
+                    ⚡
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 mb-2">Automated WhatsApp Bot</h3>
+                <p class="text-gray-600 text-sm">
+                    Your bot responds to customer inquiries instantly, shares your product catalog, and takes orders automatically—even while you sleep.
+                </p>
+            </div>
+
+            <!-- Benefit 2 -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                <div class="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center font-bold text-xl mb-4">
+                    📦
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 mb-2">Centralized Inventory</h3>
+                <p class="text-gray-600 text-sm">
+                    Post products easily, manage all your products, stock counts, and prices in one simple dashboard. Stock updates automatically as orders come in.
+                </p>
+            </div>
+
+            <!-- Benefit 3 -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                <div class="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center font-bold text-xl mb-4">
+                    📈
+                </div>
+                <h3 class="text-xl font-bold text-gray-900 mb-2">Direct Customer Contacts</h3>
+                <p class="text-gray-600 text-sm">
+                    Every order links directly to the customer's WhatsApp phone number, allowing you to build repeat buyer relationships without extra apps.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2: For Customers -->
+    <section class="bg-white py-16 border-t border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-gray-900">How WingaShop Help Customers </h2>
+                <p class="text-gray-600 mt-2">Zero registration, view all products and Fast Order Placement.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8 text-center">
+                <div class="p-4">
+                    <div class="w-10 h-10 bg-green-600 text-white font-bold rounded-full flex items-center justify-center mx-auto mb-4">1</div>
+                    <h4 class="font-bold text-gray-900 text-lg mb-1">Click the Link</h4>
+                    <p class="text-gray-600 text-sm">Customers open the Seller's custom store link shared on social media or <a href="/catalog" color style="color: #28a735; text-decoration: underline;"> Click here to view Products</a> </p>
+                </div>
+
+                <div class="p-4">
+                    <div class="w-10 h-10 bg-green-600 text-white font-bold rounded-full flex items-center justify-center mx-auto mb-4">2</div>
+                    <h4 class="font-bold text-gray-900 text-lg mb-1">Select Products</h4>
+                    <p class="text-gray-600 text-sm">Browse items, pick quantities, and add them to their shopping cart instantly.</p>
+                </div>
+
+                <div class="p-4">
+                    <div class="w-10 h-10 bg-green-600 text-white font-bold rounded-full flex items-center justify-center mx-auto mb-4">3</div>
+                    <h4 class="font-bold text-gray-900 text-lg mb-1"> Send to WhatsApp </h4>
+                    <p class="text-gray-600 text-sm">The order goes directly to the Seller's WhatsApp for instant confirmation and payment processing.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Portal Navigation Section -->
+    <section class="py-16 bg-gray-100">
+        <div class="max-w-5xl mx-auto px-4 text-center">
+            <h2 class="text-3xl font-bold text-gray-900 mb-8">Ready to Access Your Portal?</h2>
+            
+            <div class="grid sm:grid-cols-2 gap-6 max-w-2xl mx-auto">
+                <!-- Seller Portal Card -->
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 text-left flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-2xl font-bold text-gray-900 mb-2"> Seller</h3>
+                        <p class="text-gray-600 text-sm mb-6">Manage your products, view WhatsApp orders, and check sales analytics.</p>
+                    </div>
+                    <a href="/login" class="block text-center py-3 px-4 font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 transition">
+                        Login as Seller
+                    </a>
+                </div>
+
+                <!-- Customer Portal Card -->
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 text-left flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-2xl font-bold text-gray-900 mb-2">Customer</h3>
+                        <p class="text-gray-600 text-sm mb-6">Browse products, place orders seamlessly and track orders in real-time.</p>
+                    </div>
+                    <a href="/catalog" class="block text-center py-3 px-4 font-bold bg-green-600 text-white rounded-xl hover:bg-green-700 transition">
+                        View Products
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 py-6 text-center text-xs text-gray-500">
+        <p>&copy; 2026 Winga Shop Platform. All rights reserved.</p>
+    </footer>
+
+</body>
+</html>
