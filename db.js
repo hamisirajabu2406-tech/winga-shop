@@ -7,7 +7,8 @@ const knex = require('knex')({
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'winga_shop',
-    port: process.env.DB_PORT || 3306
+    port: process.env.DB_PORT || 3306,
+    ssl: { rejectUnauthorized: false }
   },
   pool: { min: 2, max: 10 }
 });
@@ -79,14 +80,14 @@ async function initDb() {
     }
 
     if (!await knex.schema.hasTable('password_resets')) {
-  await knex.schema.createTable('password_resets', (table) => {
-    table.increments('id').primary();
-    table.string('phone', 50).notNullable();
-    table.string('otp', 6).notNullable();
-    table.timestamp('expiresAt').notNullable();
-    table.timestamp('createdAt').defaultTo(knex.fn.now());
-  });
-}
+      await knex.schema.createTable('password_resets', (table) => {
+        table.increments('id').primary();
+        table.string('phone', 50).notNullable();
+        table.string('otp', 6).notNullable();
+        table.timestamp('expiresAt').notNullable();
+        table.timestamp('createdAt').defaultTo(knex.fn.now());
+      });
+    }
 
     console.log('✅ Database initialized successfully.');
   } catch (err) {
