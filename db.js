@@ -4,10 +4,11 @@ const knex = require('knex')({
   client: 'mysql2',
   connection: {
     host: process.env.DB_HOST || '127.0.0.1',
-    user: process.env.DB_USER || 'root',
+    user: process.env.DB_USER || 'avnadmin',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'winga_shop',
-    port: process.env.DB_PORT || 3306
+    database: process.env.DB_NAME || 'defaultdb',
+    port: process.env.DB_PORT || 25801,
+    ssl: { rejectUnauthorized: false } // Muhimu kwa ajili ya usalama wa Aiven cloud
   },
   pool: { min: 2, max: 10 }
 });
@@ -79,14 +80,14 @@ async function initDb() {
     }
 
     if (!await knex.schema.hasTable('password_resets')) {
-  await knex.schema.createTable('password_resets', (table) => {
-    table.increments('id').primary();
-    table.string('phone', 50).notNullable();
-    table.string('otp', 6).notNullable();
-    table.timestamp('expiresAt').notNullable();
-    table.timestamp('createdAt').defaultTo(knex.fn.now());
-  });
-}
+      await knex.schema.createTable('password_resets', (table) => {
+        table.increments('id').primary();
+        table.string('phone', 50).notNullable();
+        table.string('otp', 6).notNullable();
+        table.timestamp('expiresAt').notNullable();
+        table.timestamp('createdAt').defaultTo(knex.fn.now());
+      });
+    }
 
     console.log('✅ Database initialized successfully.');
   } catch (err) {
