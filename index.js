@@ -141,7 +141,11 @@ app.post('/api/orders', async (req, res) => {
     const { wingaId, productId, productName, sellingPrice, customerPhone, location, size, quantity, sellerPhoneFallback } = req.body;
     
     const parsedWingaId = parseInt(wingaId) || 1;
-    const [orderId] = await db('orders').insert({
+    const maxResult = await db('orders').max('orderId as maxId').first();
+    const nextOrderId = (maxResult && maxResult.maxId ? maxResult.maxId : 0) + 1;
+
+    await db('orders').insert({
+      orderId: nextOrderId,
       wingaId: parsedWingaId,
       productId: productId || null,
       productName: productName || 'Bidhaa',
@@ -154,7 +158,6 @@ app.post('/api/orders', async (req, res) => {
       date: new Date()
     });
 
-    // Tafuta taarifa za Winga (Muuzaji)
     const winga = await db('wingas').where({ id: parsedWingaId }).first();
     let targetSellerPhone = '';
 
@@ -166,7 +169,7 @@ app.post('/api/orders', async (req, res) => {
       targetSellerPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
     }
 
-    const message = `🛍️ *ODA MPYA KUTOKA WINGA-HUB* (#WGA-${orderId})\n` +
+    const message = `🛍️ *ODA MPYA KUTOKA WINGA-HUB* (#WGA-${nextOrderId})\n` +
                     `-----------------------------------\n` +
                     `📦 *Bidhaa:* ${productName}\n` +
                     `💰 *Bei:* TSh ${Number(sellingPrice).toLocaleString()}\n` +
@@ -178,7 +181,7 @@ app.post('/api/orders', async (req, res) => {
 
     const whatsappUrl = `https://wa.me/${targetSellerPhone}?text=` + encodeURIComponent(message);
 
-    res.json({ success: true, orderId, whatsappUrl });
+    res.json({ success: true, orderId: nextOrderId, whatsappUrl });
   } catch (err) {
     console.error('API Order Error:', err);
     res.status(500).json({ success: false, error: 'Imeshindwa kuhifadhi oda kwenye mfumo.' });
@@ -208,7 +211,7 @@ app.post('/api/sync-localStorage', async (req, res) => {
   }
 });
 
-// Public Catalog Route (Database Backed with Click-to-Chat Integration)
+// Public Catalog Route
 app.get('/catalog', async (req, res) => {
   try {
     try {
@@ -755,7 +758,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Forgot Password Route (Direct Reset without Bot)
+// Forgot Password Route
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -800,101 +803,237 @@ app.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Winga Admin Dashboard Route
+// Winga Admin Dashboard Route (Kamili yenye picha, edit/delete, takwimu na kubadilisha password)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
-    const wingaId = req.session.wingaId;
-    const winga = await db('wingas').where({ id: wingaId }).first();
-    const products = await db('products').where({ wingaId });
-    const orders = await db('orders').where({ wingaId }).orderBy('orderId', 'desc');
+    const currentWingaId = req.session.wingaId;
+    const currentWinga = await db('wingas').where({ id: currentWingaId }).first();
+    const products = await db('products').where({ wingaId: currentWingaId });
+    const orders = await db('orders').where({ wingaId: currentWingaId });
+    const reviews = await db('reviews').select('*');
 
-    let productRows = products.map(p => `
-      <tr>
-        <td>${p.id}</td>
-        <td>${escapeHtml(p.name)}</td>
-        <td>TSh ${Number(p.sellingPrice || p.price || 0).toLocaleString()}</td>
-        <td>${escapeHtml(p.category || 'General')}</td>
+    let totalRevenue = 0;
+    let totalCost = 0;
+    let completedOrdersCount = 0;
+
+    orders.forEach(o => {
+      if (o.status === 'Completed') {
+        const selling = Number(o.sellingPrice || o.price || 0);
+        let buying = Number(o.buyingPrice || 0);
+        if (!buying) {
+          const matchedProduct = products.find(p => p.name === o.productName);
+          buying = matchedProduct ? Number(matchedProduct.buyingPrice || 0) : 0;
+        }
+        totalRevenue += selling;
+        totalCost += buying;
+        completedOrdersCount++;
+      }
+    });
+
+    const netProfit = totalRevenue - totalCost;
+
+    let productRows = products.map(p => {
+      const images = getProductImages(p);
+      let productImgHtml = '📦';
+      if (images.length > 0) {
+        const thumbHtml = images.map(img => `<img src="${img}" onclick="openModal('${img}')" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`).join('');
+        productImgHtml = `<div style="display: flex; gap: 4px; align-items: center; max-width: 110px; overflow-x: auto;">${thumbHtml}</div>`;
+      }
+      const safeName = escapeHtml(p.name);
+      const safeCategory = escapeHtml(p.category || 'General');
+      const safeSize = escapeHtml(p.size || 'Standard');
+      const buyingPrice = Number(p.buyingPrice || 0);
+      const sellingPrice = Number(p.sellingPrice || p.price || 0);
+
+      return `
+      <tr class="seller-product-row">
+        <td><strong>#${p.id}</strong></td>
+        <td>${productImgHtml}</td>
+        <td class="prod-name">${safeName}</td>
+        <td class="prod-cat">${safeCategory}</td>
+        <td>TSh ${buyingPrice.toLocaleString()}</td>
+        <td>TSh ${sellingPrice.toLocaleString()}</td>
+        <td>${safeSize}</td>
         <td>
-          <form action="/admin/products/${p.id}/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
-            <button type="submit" style="background:#dc3545; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Futa</button>
-          </form>
+          <div style="display: flex; gap: 4px;">
+            <button type="button" data-id="${p.id}" data-name="${safeName}" data-category="${safeCategory}" data-buying="${buyingPrice}" data-selling="${sellingPrice}" data-size="${safeSize}" onclick="handleEditClick(this)" style="background:#ffc107; color:#000; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✏️ Edit</button>
+            <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
+              <input type="hidden" name="id" value="${p.id}">
+              <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
+            </form>
+          </div>
         </td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
 
-    let orderRows = orders.map(o => `
+    let orderRows = orders.map(o => {
+      const currentStatus = o.status || 'Pending';
+      const rev = reviews.find(r => r.orderId === o.orderId);
+      let badgeStyle = 'background:#ffc107; color:#000;';
+      if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
+      if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
+
+      let reviewCell = rev ? `${'⭐'.repeat(rev.rating)}<br><small>"${escapeHtml(rev.comment)}"</small>` : '<em style="color:#999;">Hamna feedback</em>';
+
+      return `
       <tr>
-        <td>#${o.orderId}</td>
-        <td>${escapeHtml(o.productName || 'Bidhaa')}</td>
+        <td><strong>#${o.orderId}</strong></td>
+        <td>${escapeHtml(o.productName)}</td>
         <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
-        <td>${escapeHtml(o.customerPhone || 'Haikutajwa')} (${escapeHtml(o.location || '')})</td>
-        <td><strong>${o.status || 'Pending'}</strong></td>
+        <td>${escapeHtml(o.customerPhone)} (${escapeHtml(o.location)})</td>
+        <td><span style="padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
+        <td>${reviewCell}</td>
         <td>
-          <form action="/admin/orders/${o.orderId}/status" method="POST" style="display:inline;">
-            <select name="status" onchange="this.form.submit()" style="padding:4px; border-radius:4px;">
-              <option value="Pending" ${o.status === 'Pending' ? 'selected' : ''}>Pending</option>
-              <option value="Dispatched" ${o.status === 'Dispatched' ? 'selected' : ''}>Dispatched</option>
-              <option value="Completed" ${o.status === 'Completed' ? 'selected' : ''}>Completed</option>
-            </select>
+          <form action="/admin/order/status" method="POST" style="display:inline-flex; gap: 4px;">
+            <input type="hidden" name="orderId" value="${o.orderId}">
+            ${currentStatus !== 'Dispatched' && currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Dispatched" style="background:#17a2b8; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🚚 Dispatch</button>` : ''}
+            ${currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Completed" style="background:#28a745; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✅ Complete</button>` : ''}
           </form>
         </td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
 
     res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Winga Dashboard - ${escapeHtml(winga.name)}</title>
+      <title>Winga Dashboard - ${escapeHtml(currentWinga.name)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
-        body { font-family: sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 900px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 15px; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 14px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 24px; }
+        .stat-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stat-card h3 { margin: 0; font-size: 13px; color: #666; text-transform: uppercase; }
+        .stat-card p { margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #111; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border-bottom: 1px solid #ddd; padding: 12px; text-align: left; font-size: 14px; }
         th { background: #f8f9fa; }
-        .form-box { background: #fdfdfd; border: 1px solid #ddd; padding: 15px; border-radius: 6px; margin-bottom: 25px; }
-        input, select { padding: 8px; width: 100%; margin: 6px 0 12px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button.btn-primary { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        .logout-btn { background: #dc3545; color: white; padding: 8px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        input[type="text"], input[type="number"], input[type="file"], input[type="password"] { padding: 10px; width: 100%; margin: 6px 0 12px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button.btn-primary { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; }
+        .logout-btn { background: #dc3545; color: white; padding: 8px 14px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold; }
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
-          <h2>🏪 Duka la: ${escapeHtml(winga.name)}</h2>
+          <h2>🛍️ Duka la: ${escapeHtml(currentWinga.name)}</h2>
           <a href="/logout" class="logout-btn">🚪 Toka (Logout)</a>
         </div>
 
-        <h3>📦 Weka Bidhaa Mpya</h3>
-        <div class="form-box">
-          <form action="/admin/products" method="POST" enctype="multipart/form-data">
-            <label>Jina la Bidhaa:</label>
-            <input type="text" name="name" required>
-            <label>Bei ya Kuuzia (TSh):</label>
-            <input type="number" name="sellingPrice" required>
-            <label>Aina (Category):</label>
-            <input type="text" name="category" placeholder="Mfano: Viatu, Nguo, Simu">
-            <label>Picha za Bidhaa (Hadi 4):</label>
-            <input type="file" name="images" multiple accept="image/*">
+        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border: 1px solid #90caf9; margin-bottom: 20px;">
+          <h3 style="margin-top: 0; color: #0d47a1;">🔗 Link Yako ya Duka (Catalog)</h3>
+          <input type="text" value="${BASE_URL}/catalog?shop=${currentWingaId}" readonly style="width: 100%; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white;">
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><h3>Completed Orders</h3><p>${completedOrdersCount}</p></div>
+          <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
+          <div class="stat-card"><h3>Net Profit Earned</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
+        </div>
+
+        <div class="card">
+          <h3>🔑 Badilisha Nenosiri (Change Password)</h3>
+          <form id="changePasswordForm">
+            <div class="form-group"><label>Nenosiri la Zamani:</label><input type="password" id="oldPassword" required></div>
+            <div class="form-group"><label>Nenosiri Jipya:</label><input type="password" id="newPassword" required></div>
+            <div class="form-group"><label>Rudia Nenosiri Jipya:</label><input type="password" id="confirmPassword" required></div>
+            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer;">Hifadhi Nenosiri Jipya</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>📦 Weka Bidhaa Mpya (Hadi Picha 4)</h3>
+          <form action="/admin/add" method="POST" enctype="multipart/form-data">
+            <div class="form-row">
+              <div><label>Jina la Bidhaa:</label><input type="text" name="name" required></div>
+              <div><label>Category:</label><input type="text" name="category" placeholder="Mfano: Viatu, Nguo" required></div>
+            </div>
+            <div class="form-row">
+              <div><label>Bei ya Kununua (Cost):</label><input type="number" name="buyingPrice" required></div>
+              <div><label>Bei ya Kuuzia (Selling Price):</label><input type="number" name="sellingPrice" required></div>
+            </div>
+            <div class="form-row">
+              <div><label>Saizi (Size):</label><input type="text" name="size" value="Standard"></div>
+              <div><label>Picha za Bidhaa:</label><input type="file" name="images" multiple accept="image/*" required></div>
+            </div>
             <button type="submit" class="btn-primary">Weka Bidhaa Sokoni</button>
           </form>
         </div>
 
-        <h3>📋 Orodha ya Bidhaa Zako (${products.length})</h3>
-        <table>
-          <tr><th>ID</th><th>Jina</th><th>Bei</th><th>Category</th><th>Vitendo</th></tr>
-          ${productRows || '<tr><td colspan="5" style="text-align:center;">Huna bidhaa kwa sasa.</td></tr>'}
-        </table>
+        <div class="card">
+          <h3>📋 Orodha ya Bidhaa Zako (${products.length})</h3>
+          <table>
+            <tr><th>ID</th><th>Picha</th><th>Jina</th><th>Category</th><th>Buying</th><th>Selling</th><th>Size</th><th>Vitendo</th></tr>
+            ${productRows || '<tr><td colspan="8" style="text-align:center;">Huna bidhaa kwa sasa.</td></tr>'}
+          </table>
+        </div>
 
-        <h3>🛒 Oda Zilizopokelewa (${orders.length})</h3>
-        <table>
-          <tr><th>Oda #</th><th>Bidhaa</th><th>Bei</th><th>Mteja & Eneo</th><th>Status</th><th>Badilisha Status</th></tr>
-          ${orderRows || '<tr><td colspan="6" style="text-align:center;">Hakuna oda bado.</td></tr>'}
-        </table>
-        <p><a href="/catalog?shop=${winga.id}" target="_blank" class="btn-primary" style="text-decoration:none; display:inline-block;">🔗 Tembelea Duka Lako (Catalog)</a></p>
+        <div class="card">
+          <h3>🛒 Oda Zilizopokelewa (${orders.length})</h3>
+          <table>
+            <tr><th>Oda #</th><th>Bidhaa</th><th>Bei</th><th>Mteja & Simu</th><th>Status</th><th>Feedback</th><th>Badilisha Status</th></tr>
+            ${orderRows || '<tr><td colspan="7" style="text-align:center;">Hakuna oda bado.</td></tr>'}
+          </table>
+        </div>
       </div>
+
+      <div id="editModal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center;">
+        <div style="background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 450px;">
+          <h3>✏️ Rekebisha Bidhaa</h3>
+          <form action="/admin/product/edit" method="POST">
+            <input type="hidden" id="editId" name="id">
+            <div style="margin-bottom: 8px;"><label>Jina:</label><input type="text" id="editName" name="name" required></div>
+            <div style="margin-bottom: 8px;"><label>Category:</label><input type="text" id="editCategory" name="category" required></div>
+            <div style="margin-bottom: 8px;"><label>Bei ya Kununua:</label><input type="number" id="editBuyingPrice" name="buyingPrice" required></div>
+            <div style="margin-bottom: 8px;"><label>Bei ya Kuuzia:</label><input type="number" id="editSellingPrice" name="sellingPrice" required></div>
+            <div style="margin-bottom: 12px;"><label>Size:</label><input type="text" id="editSize" name="size"></div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button type="button" onclick="closeEditModal()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Aghana</button>
+              <button type="submit" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Hifadhi</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="imgModal" onclick="closeModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; cursor: pointer;">
+        <img id="modalImage" style="max-width: 85%; max-height: 85%; border-radius: 8px; object-fit: contain;">
+      </div>
+
+      <script>
+        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const oldPassword = document.getElementById('oldPassword').value;
+          const newPassword = document.getElementById('newPassword').value;
+          const confirmPassword = document.getElementById('confirmPassword').value;
+          try {
+            const res = await fetch('/admin/change-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ oldPassword, newPassword, confirmPassword })
+            });
+            const data = await res.json();
+            alert(data.message);
+            if (res.ok) document.getElementById('changePasswordForm').reset();
+          } catch (err) { alert('❌ Hitilafu ya mtandao.'); }
+        });
+
+        function handleEditClick(btn) {
+          document.getElementById('editId').value = btn.getAttribute('data-id');
+          document.getElementById('editName').value = btn.getAttribute('data-name');
+          document.getElementById('editCategory').value = btn.getAttribute('data-category');
+          document.getElementById('editBuyingPrice').value = btn.getAttribute('data-buying');
+          document.getElementById('editSellingPrice').value = btn.getAttribute('data-selling');
+          document.getElementById('editSize').value = btn.getAttribute('data-size');
+          document.getElementById('editModal').style.display = 'flex';
+        }
+        function closeEditModal() { document.getElementById('editModal').style.display = 'none'; }
+        function openModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imgModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('imgModal').style.display = 'none'; }
+      </script>
     </body>
     </html>
     `);
@@ -904,64 +1043,103 @@ app.get('/admin', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Actions
-app.post('/admin/products', requireWinga, upload, async (req, res) => {
-  try {
-    const { name, sellingPrice, category } = req.body;
-    const wingaId = req.session.wingaId;
-
-    let imagePaths = [];
-    if (req.files && req.files.length > 0) {
-      imagePaths = req.files.map(f => `/uploads/${f.filename}`);
+// Admin Add Product Route
+app.post('/admin/add', requireWinga, (req, res) => {
+  upload(req, res, async (err) => {
+    if (err) {
+      return res.redirect('/admin');
     }
+    try {
+      const { name, category, buyingPrice, sellingPrice, size } = req.body;
+      const uploadedFiles = req.files || [];
+      const imageUrls = uploadedFiles.map(f => `/uploads/${f.filename}`);
+      const localPaths = uploadedFiles.map(f => f.path);
 
-    await db('products').insert({
-      wingaId,
-      name,
-      category: category || 'General',
-      buyingPrice: 0,
+      await db('products').insert({
+        wingaId: req.session.wingaId,
+        name: name.trim(),
+        category: category ? category.trim() : 'General',
+        buyingPrice: parseFloat(buyingPrice || 0),
+        sellingPrice: parseFloat(sellingPrice || 0),
+        price: parseFloat(sellingPrice || 0),
+        size: size ? size.trim() : 'Standard',
+        imageUrl: JSON.stringify(imageUrls),
+        imageLocalPath: JSON.stringify(localPaths),
+        dateAdded: new Date()
+      });
+
+      res.redirect('/admin');
+    } catch (dbErr) {
+      console.error('DB Insert error:', dbErr);
+      res.redirect('/admin');
+    }
+  });
+});
+
+app.post('/admin/product/delete', requireWinga, async (req, res) => {
+  try {
+    const { id } = req.body;
+    await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).del();
+  } catch (err) {
+    console.error('Delete error:', err);
+  }
+  res.redirect('/admin');
+});
+
+app.post('/admin/product/edit', requireWinga, async (req, res) => {
+  try {
+    const { id, name, category, buyingPrice, sellingPrice, size } = req.body;
+    await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).update({
+      name: name ? name.trim() : undefined,
+      category: category ? category.trim() : undefined,
+      buyingPrice: Number(buyingPrice),
       sellingPrice: Number(sellingPrice),
       price: Number(sellingPrice),
-      imageUrl: JSON.stringify(imagePaths)
+      size: size ? size.trim() : undefined
     });
-
-    res.redirect('/admin');
   } catch (err) {
-    console.error('Add product error:', err);
-    res.status(500).send('Imeshindwa kuongeza bidhaa.');
+    console.error('Edit error:', err);
   }
+  res.redirect('/admin');
 });
 
-app.post('/admin/products/:id/delete', requireWinga, async (req, res) => {
+app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
-    const productId = req.params.id;
-    const wingaId = req.session.wingaId;
-    await db('products').where({ id: productId, wingaId }).del();
-    res.redirect('/admin');
+    const { orderId, status } = req.body;
+    await db('orders').where({ orderId: parseInt(orderId), wingaId: req.session.wingaId }).update({ status });
   } catch (err) {
-    console.error('Delete product error:', err);
-    res.status(500).send('Imeshindwa kufuta bidhaa.');
+    console.error('Status update error:', err);
   }
+  res.redirect('/admin');
 });
 
-app.post('/admin/orders/:id/status', requireWinga, async (req, res) => {
+app.post('/admin/change-password', requireWinga, async (req, res) => {
+  const wingaId = req.session.wingaId;
+  const { oldPassword, newPassword, confirmPassword } = req.body;
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({ success: false, message: 'Tafadhali jaza nafasi zote.' });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ success: false, message: 'Nenosiri jipya halifanani.' });
+  }
   try {
-    const orderId = req.params.id;
-    const { status } = req.body;
-    const wingaId = req.session.wingaId;
-
-    await db('orders').where({ orderId, wingaId }).update({ status });
-    res.redirect('/admin');
+    const winga = await db('wingas').where({ id: wingaId }).first();
+    if (!winga || !bcrypt.compareSync(oldPassword, winga.password)) {
+      return res.status(400).json({ success: false, message: 'Nenosiri la zamani si sahihi.' });
+    }
+    const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
+    await db('wingas').where({ id: wingaId }).update({ password: hashedNewPassword });
+    return res.json({ success: true, message: '✅ Nenosiri limebadilishwa kikamilifu!' });
   } catch (err) {
-    console.error('Update order status error:', err);
-    res.redirect('/admin');
+    return res.status(500).json({ success: false, message: 'Hitilafu ya server.' });
   }
 });
 
-// Superadmin Dashboard Route
+// Superadmin Route
 app.get('/superadmin', async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
+    const products = await db('products').select('*');
     const orders = await db('orders').select('*');
 
     let wingaRows = wingas.map(w => `
@@ -976,36 +1154,27 @@ app.get('/superadmin', async (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Superadmin Panel</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>
-        body { font-family: sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 950px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-        h2 { color: #d9534f; margin-top: 0; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 14px; }
-        th { background: #f8f9fa; }
-      </style>
+    <head><title>Superadmin Panel</title>
+    <style>body { font-family: sans-serif; background: #f4f6f8; margin: 0; padding: 20px; }
+    .container { max-width: 950px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }</style>
     </head>
     <body>
       <div class="container">
         <h2>👑 Superadmin Control Panel</h2>
-        <p>Jumla ya Mawinga Waliosajiliwa: <strong>${wingas.length}</strong> | Jumla ya Oda Zote: <strong>${orders.length}</strong></p>
-        
-        <h3>Orodha ya Mawinga (Shops)</h3>
+        <p>Mawinga: <strong>${wingas.length}</strong> | Bidhaa: <strong>${products.length}</strong> | Oda: <strong>${orders.length}</strong></p>
+        <h3>Orodha ya Mawinga</h3>
         <table>
-          <tr><th>ID</th><th>Jina la Duka</th><th>Simu</th><th>Tarehe ya Usajili</th></tr>
-          ${wingaRows || '<tr><td colspan="4" style="text-align:center;">Hakuna winga bado.</td></tr>'}
+          <tr><th>ID</th><th>Jina la Duka</th><th>Simu</th><th>Tarehe</th></tr>
+          ${wingaRows || '<tr><td colspan="4" style="text-align:center;">Hakuna winga.</td></tr>'}
         </table>
-        <p><a href="/catalog" target="_blank" style="color: #007bff; text-decoration: none; font-weight: bold;">🔗 Tembelea Soko Kuu (Catalog)</a></p>
       </div>
     </body>
     </html>
     `);
   } catch (err) {
-    console.error('Superadmin error:', err);
-    res.status(500).send('Hitilafu kwenye Superadmin panel.');
+    res.status(500).send('Hitilafu kwenye Superadmin.');
   }
 });
 
@@ -1015,13 +1184,11 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Anzisha Server ya Express
-const PORT_NUM = process.env.PORT || 3000;
-app.listen(PORT_NUM, async () => {
+app.listen(PORT, async () => {
   try {
     await db.raw('SELECT 1');
     console.log('✅ Database initialized successfully.');
-    console.log(`🌐 Server active on http://localhost:${PORT_NUM}`);
+    console.log(`🌐 Server active on ${BASE_URL}`);
   } catch (err) {
     console.error('❌ Database connection failed:', err);
   }
