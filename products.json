@@ -1,0 +1,41 @@
+[
+  {
+    "id": 2,
+    "wingaId": 3,
+    "name": "SILK DRESS",
+    "category": "DRESS",
+    "buyingPrice": 12000,
+    "sellingPrice": 18000,
+    "price": 18000,
+    "size": "Standard",
+    "imageUrl": "/uploads/1786869459543-523388662.jpg",
+    "imageLocalPath": "/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1786869459543-523388662.jpg",
+    "dateAdded": "2026-08-16T08:37:39.715Z"
+  },
+  {
+    "id": 5,
+    "wingaId": 5,
+    "name": "SILK DRESS",
+    "category": "DRESS",
+    "buyingPrice": 12000,
+    "sellingPrice": 18000,
+    "price": 18000,
+    "size": "Standard",
+    "imageUrl": "[\"/uploads/1787161059509-977125074.png\",\"/uploads/1787161059645-107011710.png\"]",
+    "imageLocalPath": "[\"/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1787161059509-977125074.png\",\"/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1787161059645-107011710.png\"]",
+    "dateAdded": "2026-08-19T17:37:39.801Z"
+  },
+  {
+    "id": 6,
+    "wingaId": 6,
+    "name": "Boyfriend Jeans",
+    "category": "Jeans",
+    "buyingPrice": 16000,
+    "sellingPrice": 22000,
+    "price": 22000,
+    "size": "XL",
+    "imageUrl": "[\"/uploads/1787402194975-493167244.jpeg\"]",
+    "imageLocalPath": "[\"/home/hamisi/Desktop/winga-whatsapp-bot/uploads/1787402194975-493167244.jpeg\"]",
+    "dateAdded": "2026-08-22T12:36:35.055Z"
+  }
+]
