@@ -120,7 +120,7 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-// Helper: Format phone number for WhatsApp (e.g. 0712... -> 255712...)
+// Helper: Format phone number for WhatsApp
 function formatPhoneForWhatsApp(phone) {
   if (!phone) return '';
   let p = phone.trim().replace(/[^0-9]/g, '');
@@ -648,7 +648,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Winga Registration Routes
+// Winga Registration Routes (Updated to handle duplicate phone overwrite smoothly)
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -685,19 +685,30 @@ app.get('/register', (req, res) => {
 app.post('/register', async (req, res) => {
   try {
     const { name, phone, password } = req.body;
+    const cleanPhone = phone.trim();
+    const cleanName = name.trim();
     const hashedPassword = bcrypt.hashSync(password, 10);
 
-    await db('wingas').insert({
-      name: name.trim(),
-      phone: phone.trim(),
-      password: hashedPassword,
-      createdAt: new Date()
-    });
+    const existingWinga = await db('wingas').where({ phone: cleanPhone }).first();
 
-    res.send(`<script>alert('Usajili umefanikiwa! Tafadhali ingia.'); window.location.href='/login';</script>`);
+    if (existingWinga) {
+      await db('wingas').where({ phone: cleanPhone }).update({
+        name: cleanName,
+        password: hashedPassword
+      });
+      res.send(`<script>alert('Akaunti imesasishwa kikamilifu! Tafadhali ingia.'); window.location.href='/login';</script>`);
+    } else {
+      await db('wingas').insert({
+        name: cleanName,
+        phone: cleanPhone,
+        password: hashedPassword,
+        createdAt: new Date()
+      });
+      res.send(`<script>alert('Usajili umefanikiwa! Tafadhali ingia.'); window.location.href='/login';</script>`);
+    }
   } catch (err) {
     console.error('Register error:', err);
-    res.send(`<script>alert('Namba ya simu imeshatumika au kuna hitilafu.'); window.location.href='/register';</script>`);
+    res.send(`<script>alert('Hitilafu imetokea kwenye usajili.'); window.location.href='/register';</script>`);
   }
 });
 
@@ -803,7 +814,7 @@ app.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Winga Admin Dashboard Route (Kamili yenye picha, edit/delete, takwimu na kubadilisha password)
+// Winga Admin Dashboard Route
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWingaId = req.session.wingaId;
