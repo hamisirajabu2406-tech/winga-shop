@@ -73,12 +73,13 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 // Middleware Setup
+app.set('trust proxy', 1); // Muhimu sana kuzuia loop kwenye Render Proxy
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Unified Session Middleware
+// Unified Session Middleware with Lax cookie settings to prevent loop
 app.use(session({
   secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
   resave: false,
@@ -86,6 +87,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
@@ -115,7 +117,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB Limit
+  limits: { fileSize: 5 * 1024 * 1024 }
 }).array('images', 4);
 
 // Authentication Guard Middleware
@@ -234,35 +236,10 @@ async function notifyWinga(order, product) {
     if (!imageSent) {
       await client.sendMessage(wingaChatId, alertMessage);
     }
-        
-    console.log(`📲 WhatsApp alert sent to Winga: ${winga.name} (${phone})`);
   } catch (err) {
     console.error('❌ Failed to send alert to Winga:', err);
   }
 }
-
-// Express Route: LocalStorage Sync Endpoint
-app.post('/api/sync-localStorage', async (req, res) => {
-  const { products } = req.body;
-  try {
-    if (Array.isArray(products)) {
-      for (const p of products) {
-        await db('products').insert({
-          wingaId: p.wingaId || 1,
-          name: p.name,
-          category: p.category || 'General',
-          buyingPrice: p.buyingPrice || 0,
-          sellingPrice: p.sellingPrice || p.price || 0,
-          price: p.sellingPrice || p.price || 0,
-          imageUrl: p.imageUrl || ''
-        }).onConflict('id').merge();
-      }
-    }
-    res.json({ success: true, message: 'LocalStorage items migrated to MySQL.' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // Landing Page
 app.get('/', (req, res) => {
@@ -630,7 +607,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Winga Login Routes
+// Winga Login Routes (Pamoja na Link ya Kujisajili / Register)
 app.get('/login', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -642,7 +619,7 @@ app.get('/login', (req, res) => {
       .login-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 300px; }
       input { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
       button { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
-      a { color: #007bff; text-decoration: none; font-size: 13px; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 10px; }
     </style>
   </head>
   <body>
@@ -656,9 +633,8 @@ app.get('/login', (req, res) => {
         <input type="password" name="password" placeholder="••••••••" required>
         <button type="submit">Ingia Dashboard</button>
       </form>
-      <p style="margin-top: 15px;">
-        <a href="/forgot-password">🔑 Umesahau Nenosiri? (Forgot Password)</a>
-      </p>
+      <a href="/register">📝 Jisajili kama Winga Mpya (Register)</a>
+      <a href="/forgot-password">🔑 Umesahau Nenosiri? (Forgot Password)</a>
     </div>
   </body>
   </html>
@@ -684,6 +660,79 @@ app.post('/login', async (req, res) => {
     res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
   } catch (err) {
     console.error('Login error:', err);
+    res.status(500).send('Hitilafu ya Server.');
+  }
+});
+
+// Winga Register Routes (Kujisajili Mwenyewe)
+app.get('/register', (req, res) => {
+  res.send(`
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Jisajili kama Winga - Winga Shop</title>
+    <style>
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 320px; }
+      input { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
+      button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; margin-top: 10px; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 15px; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h2>📝 Usajili wa Winga</h2>
+      <form action="/register" method="POST">
+        <input type="text" name="name" placeholder="Jina la Biashara / Lako" required>
+        <input type="text" name="phone" placeholder="Namba ya Simu (Mfano: 0712345678)" required>
+        <input type="password" name="password" placeholder="Nenosiri (Password)" required minlength="6">
+        <button type="submit">Jisajili Sasa</button>
+      </form>
+      <a href="/login">← Rudi Kwenye Login</a>
+    </div>
+  </body>
+  </html>
+  `);
+});
+
+app.post('/register', async (req, res) => {
+  try {
+    const name = (req.body.name || '').trim();
+    const phone = (req.body.phone || '').trim();
+    const rawPassword = (req.body.password || '').trim();
+    if (!name || !phone || !rawPassword) {
+      return res.send('❌ Tafadhali jaza taarifa zote. <br><a href="/register">Jaribu Tena</a>');
+    }
+    const existing = await db('wingas').where({ phone }).first();
+    if (existing) {
+      return res.send('❌ Namba hii ya simu imeshasajiliwa tayari. <br><a href="/login">Ingia hapa (Login)</a>');
+    }
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + 30); // Siku 30 za majaribio au mwanzo
+    await db('wingas').insert({
+      name,
+      phone,
+      password: hashedPassword,
+      status: 'active',
+      expiryDate: expiry,
+      dateAdded: new Date()
+    });
+    res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head><title>Mafanikio</title></head>
+    <body style="font-family:sans-serif; background:rgb(106, 136, 232); display:flex; justify-content:center; align-items:center; height:100vh; margin:0;">
+      <div style="background:white; padding:40px; border-radius:8px; text-align:center;">
+        <h2 style="color:#28a745;">🎉 Usajili Umekamilika!</h2>
+        <p>Akaunti yako ya duka imefunguliwa kwa mafanikio.</p>
+        <a href="/login" style="display:inline-block; margin-top:10px; padding:10px 20px; background:#28a745; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">Nenda Kwenye Login</a>
+      </div>
+    </body>
+    </html>
+    `);
+  } catch (err) {
+    console.error('Register error:', err);
     res.status(500).send('Hitilafu ya Server.');
   }
 });
@@ -1139,7 +1188,6 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
         }
         if (statusMessage) {
           await client.sendMessage(customerChatId, statusMessage);
-          console.log(`📲 Real-time status update (${status}) sent to customer JID: ${customerChatId}`);
         }
       }
     }
@@ -1180,9 +1228,7 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// ==========================================
-// FORGOT & RESET PASSWORD ROUTES (WhatsApp OTP)
-// ==========================================
+// Forgot & Reset Password Routes
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -1246,7 +1292,7 @@ app.post('/forgot-password', async (req, res) => {
       `-----------------------------------\n` +
       `Habari *${winga.name}*, kodi yako ya kubadilisha nenosiri ni:\n\n` +
       `👉 *${otp}*\n\n` +
-      `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10. Kama hukuomba mabadiliko haya, puzia ujumbe huu.`;
+      `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10.`;
     await client.sendMessage(targetJid, otpMessage);
     res.send(`
     <!DOCTYPE html>
@@ -1278,10 +1324,7 @@ app.post('/forgot-password', async (req, res) => {
     `);
   } catch (err) {
     console.error('CRITICAL ERROR sending OTP via WhatsApp:', err);
-    if (err.message && err.message.includes('evaluate')) {
-      isWhatsappReady = false;
-    }
-    res.status(500).send(`❌ Hitilafu imetokea wakati wa kutuma kodi: ${err.message}. Tafadhali jaribu tena baada ya sekunde chache.`);
+    res.status(500).send(`❌ Hitilafu imetokea wakati wa kutuma kodi.`);
   }
 });
 
@@ -1310,19 +1353,12 @@ app.post('/reset-password', async (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Mafanikio - Winga Shop</title>
-      <style>
-        body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .box { background: white; padding: 40px; border-radius: 8px; text-align: center; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        a { display: inline-block; margin-top: 15px; padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
+    <head><title>Mafanikio</title></head>
+    <body style="font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
+      <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; max-width: 380px;">
         <h2 style="color:#28a745;">🎉 Hongera!</h2>
-        <p>Nenosiri lako limebadilishwa kikamilifu. Sasa unaweza kuingia kwenye Dashboard yako.</p>
-        <a href="/login">Ingia Dashboard (Login)</a>
+        <p>Nenosiri lako limebadilishwa kikamilifu.</p>
+        <a href="/login" style="display:inline-block; margin-top:15px; padding:12px 24px; background:#28a745; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">Ingia Dashboard</a>
       </div>
     </body>
     </html>
@@ -1333,7 +1369,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Routes (Database Backed)
+// Super Admin Routes
 app.get('/superadmin', async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -1505,20 +1541,6 @@ app.get('/superadmin', async (req, res) => {
             <tbody id="superadminProductTable">${superadminProductRows || '<tr><td colspan="8">No products uploaded across the platform.</td></tr>'}</tbody>
           </table>
         </div>
-        <script>
-          function filterSuperadminProducts() {
-            var input = document.getElementById('superSearchInput').value.toLowerCase().trim();
-            var rows = document.querySelectorAll('#superadminProductTable tr.super-prod-row');
-            rows.forEach(function(row) {
-              var name = row.querySelector('.sprod-name').innerText.toLowerCase();
-              if (name.indexOf(input) !== -1) {
-                row.style.display = '';
-              } else {
-                row.style.display = 'none';
-              }
-            });
-          }
-        </script>
       </div>
     </body>
     </html>
@@ -1561,7 +1583,7 @@ app.post('/superadmin/add-winga', async (req, res) => {
     res.redirect('/superadmin');
   } catch (err) {
     console.error('Add winga error:', err);
-    res.send('❌ Impose: Phone number might already exist.');
+    res.send('❌ Namba ya simu huenda imeshachukuliwa.');
   }
 });
 
@@ -1619,21 +1641,6 @@ if (client) {
     isWhatsappReady = true;
   });
 
-  client.on('authenticated', () => {
-    console.log('🔒 WhatsApp client authenticated');
-  });
-
-  client.on('auth_failure', (msg) => {
-    console.error('❌ WhatsApp authentication failure:', msg);
-    isWhatsappReady = false;
-  });
-
-  client.on('disconnected', (reason) => {
-    console.warn('⚠️ WhatsApp client disconnected:', reason);
-    isWhatsappReady = false;
-    try { client.initialize(); } catch (e) {}
-  });
-
   client.on('message', async (msg) => {
     try {
       const text = (msg.body || '').trim();
@@ -1659,7 +1666,7 @@ if (client) {
         } else {
           await db('reviews').insert({ orderId, rating, comment: comment.trim(), date: new Date() });
         }
-        await msg.reply(`🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.`);
+        await msg.reply(`🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐`);
         return;
       }
 
@@ -1723,42 +1730,11 @@ if (client) {
         notifyWinga(newOrder, product);
         return;
       }
-
-      const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
-      if (greetingKeywords.some(k => lowerText === k || lowerText.startsWith(k + ' '))) {
-        const catalogUrl = `${BASE_URL}/catalog`;
-        await msg.reply(`Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${catalogUrl}`);
-        return;
-      }
     } catch (err) {
       console.error('Handler error:', err);
     }
   });
 }
-
-// Daily Cron Job for Subscriptions
-cron.schedule('0 8 * * *', async () => {
-  try {
-    if (!isWhatsappReady || !client || !client.pupPage) return;
-    const wingas = await db('wingas').select('*');
-    const now = new Date();
-    for (let w of wingas) {
-      if (!w.expiryDate) continue;
-      const expiry = new Date(w.expiryDate);
-      const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-      const formattedPhone = w.phone.startsWith('0') ? '255' + w.phone.slice(1) : w.phone;
-      const chatId = formattedPhone + '@c.us';
-      if (daysLeft <= 0 && w.status === 'active') {
-        await db('wingas').where({ id: w.id }).update({ status: 'suspended' });
-        try { await client.sendMessage(chatId, `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa malipo umekwisha.`); } catch (e) {}
-      } else if (daysLeft === 3 && w.status === 'active') {
-        try { await client.sendMessage(chatId, `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako itasitishwa ndani ya siku 3.`); } catch (e) {}
-      }
-    }
-  } catch (cronErr) {
-    console.error('Cron error:', cronErr);
-  }
-});
 
 // Start Server and initialize bot safely
 app.listen(PORT, async () => {
@@ -1769,7 +1745,7 @@ app.listen(PORT, async () => {
       try {
         client.initialize();
       } catch (err) {
-        console.warn('⚠️ WhatsApp client initialization deferred or skipped:', err.message);
+        console.warn('⚠️ WhatsApp client initialization deferred:', err.message);
       }
     }
   } catch (err) {
