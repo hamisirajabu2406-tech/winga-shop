@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
@@ -35,13 +35,14 @@ if (process.env.NODE_ENV === 'production') {
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-// Middleware Setup
+// Middleware Setup & Proxy Trust for Render Cloud
+app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Unified Session Middleware
+// Unified Session Middleware with Lax cookie settings to prevent login loops
 app.use(session({
   secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
   resave: false,
@@ -49,6 +50,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
@@ -145,7 +147,7 @@ async function connectToWhatsApp() {
     if (connection === 'close') {
       isWhatsappReady = false;
       const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.warn('⚠️ WhatsApp connection closed due to ', lastDisconnect?.error, ', reconnecting:', shouldReconnect);
+      console.warn('⚠️ WhatsApp connection closed, reconnecting:', shouldReconnect);
       if (shouldReconnect) {
         connectToWhatsApp();
       }
@@ -335,41 +337,17 @@ async function notifyWinga(order, product) {
     } else {
       await sock.sendMessage(wingaChatId, { text: alertMessage });
     }
-    console.log(`📲 WhatsApp alert sent to Winga: ${winga.name} (${phone})`);
   } catch (err) {
     console.error('❌ Failed to send alert to Winga:', err);
   }
 }
-
-// Express Route: LocalStorage Sync Endpoint
-app.post('/api/sync-localStorage', async (req, res) => {
-  const { products } = req.body;
-  try {
-    if (Array.isArray(products)) {
-      for (const p of products) {
-        await db('products').insert({
-          wingaId: p.wingaId || 1,
-          name: p.name,
-          category: p.category || 'General',
-          buyingPrice: p.buyingPrice || 0,
-          sellingPrice: p.sellingPrice || p.price || 0,
-          price: p.sellingPrice || p.price || 0,
-          imageUrl: p.imageUrl || ''
-        }).onConflict('id').merge();
-      }
-    }
-    res.json({ success: true, message: 'LocalStorage items migrated to MySQL.' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // Landing Page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Public Catalog Route (Database Backed)
+// Public Catalog Route
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -412,7 +390,7 @@ app.get('/catalog', async (req, res) => {
       }
       const imageHtml = (mainImage && mainImage.trim() !== '')
         ? `<div style="position: relative; cursor: pointer;" onclick="openImgModal(document.getElementById('img-${p.id}').getAttribute('data-fullsrc') || '${mainImage}')">
-            <img id="img-${p.id}" data-fullsrc="${mainImage}" src="${mainImage}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; transition: transform 0.2s ease;">
+            <img id="img-${p.id}" data-fullsrc="${mainImage}" src="${mainImage}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
             <span style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.65); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">🔍 Gusa Kukuza</span>
            </div>${galleryThumbnailsHtml}`
         : `<div style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd;">📦</div>`;
@@ -428,7 +406,6 @@ app.get('/catalog', async (req, res) => {
         </div>
         <div style="font-size: 13px; color: #555; margin-bottom: 8px;">
           <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
-          <span>📍 Dar es Salaam</span>
         </div>
         <button
           data-id="${p.id}"
@@ -497,7 +474,7 @@ app.get('/catalog', async (req, res) => {
       </div>
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 20px; box-sizing: border-box;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
-        <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; box-shadow: 0 4px 25px rgba(0,0,0,0.8); object-fit: contain;">
+        <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
@@ -508,11 +485,11 @@ app.get('/catalog', async (req, res) => {
           <input type="hidden" id="selectedProductName">
           <input type="hidden" id="selectedProductPrice">
           <div class="form-group">
-            <label>Namba yako ya Simu (Phone Number):</label>
+            <label>Namba yako ya Simu:</label>
             <input type="text" id="orderPhone" placeholder="Mfano: 0712345678" required>
           </div>
           <div class="form-group">
-            <label>Eneo Unapoishi / Mkoa (Location):</label>
+            <label>Eneo Unapoishi / Mkoa:</label>
             <input type="text" id="orderLocation" placeholder="Mfano: Dar es Salaam, Sinza" required>
           </div>
           <div class="form-group">
@@ -601,7 +578,7 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Order Tracking Routes (Database Backed)
+// Order Tracking Routes
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -615,7 +592,7 @@ app.get('/track', async (req, res) => {
         const existingReview = await db('reviews').where({ orderId: searchId }).first();
         let statusBadge = '🟡 Pending (Inashughulikiwa)';
         if (currentStatus === 'Dispatched') statusBadge = '🚚 Dispatched (Ipo Njiani Kuja)';
-        if (currentStatus === 'Completed') statusBadge = '✅ Completed (Imeingizwa Na Kukamilika)';
+        if (currentStatus === 'Completed') statusBadge = '✅ Completed (Imekamilika)';
         let reviewSection = '';
         if (currentStatus === 'Completed') {
           if (existingReview) {
@@ -748,7 +725,6 @@ app.get('/login', (req, res) => {
   <body>
     <div class="login-box">
       <h2>🛍️ Winga Portal Login</h2>
-      <p>Enter your registered details</p>
       <form action="/login" method="POST">
         <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Namba ya Simu:</label>
         <input type="text" name="phone" placeholder="0712345678" required>
@@ -757,7 +733,7 @@ app.get('/login', (req, res) => {
         <button type="submit">Ingia Dashboard</button>
       </form>
       <p style="margin-top: 15px;">
-        <a href="/forgot-password">🔑 Umesahau Nenosiri? (Forgot Password)</a>
+        <a href="/forgot-password">🔑 Umesahau Nenosiri?</a>
       </p>
     </div>
   </body>
@@ -770,7 +746,7 @@ app.post('/login', async (req, res) => {
     const phone = (req.body.phone || '').trim();
     const password = (req.body.password || '').trim();
     if (!phone || !password) {
-      return res.send('❌ Tafadhali jaza namba ya simu na nywila (password). <br><a href="/login">Jaribu Tena</a>');
+      return res.send('❌ Tafadhali jaza namba ya simu na nywila. <br><a href="/login">Jaribu Tena</a>');
     }
     const matchedWinga = await db('wingas').where({ phone }).first();
     if (matchedWinga) {
@@ -778,7 +754,7 @@ app.post('/login', async (req, res) => {
       if (isPasswordValid) {
         req.session.wingaId = matchedWinga.id;
         req.session.wingaName = matchedWinga.name;
-        return res.redirect('/admin');
+        return req.redirect('/admin');
       }
     }
     res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
@@ -797,7 +773,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga (Protected via Middleware)
+// Admin Dashboard for Winga
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -807,7 +783,7 @@ app.get('/admin', requireWinga, async (req, res) => {
       <div style="text-align:center; padding: 50px; font-family:sans-serif;">
         <h1 style="color: #dc3545;">⚠️ Akaunti Imesitishwa</h1>
         <p>Muda wako wa malipo umekwisha. Hauruhusiwi kuingiza bidhaa mpya au kuona oda zako.</p>
-        <p>Tafadhali wasiliana na Admin (${botPhone}) na kufanya malipo ili kufunguliwa.</p>
+        <p>Wasiliana na Admin (${botPhone}) kufanya malipo ili kufunguliwa.</p>
         <a href="/logout" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">Rudi Kwenye Login</a>
       </div>
       `);
@@ -961,19 +937,19 @@ app.get('/admin', requireWinga, async (req, res) => {
       <div class="container">
         ${alertMessage}
         <div class="top-nav">
-          <h1>🛍️ Winga Private Dashboard - ${escapeHtml(currentWingaName)}</h1>
+          <h1>🛍️ Winga Dashboard - ${escapeHtml(currentWingaName)}</h1>
           <div>
-            <a href="https://wa.me/${botPhone}?text=Habari%20Admin%20naomba%20msaada%20kuhusu%20duka%20langu" target="_blank" class="contact-support">💬 Contact Admin / Msaada</a>
+            <a href="https://wa.me/${botPhone}?text=Habari%20Admin" target="_blank" class="contact-support">💬 Msaada</a>
             <a href="/logout" style="margin-left: 10px; color:#dc3545; font-weight:bold; text-decoration:none;">Logout</a>
           </div>
         </div>
         <div class="card">
-          <h3>🔑 Badilisha Nenosiri (Change Password)</h3>
+          <h3>🔑 Badilisha Nenosiri</h3>
           <form id="changePasswordForm">
             <div class="form-group"><label>Nenosiri la Zamani:</label><input type="password" id="oldPassword" required></div>
             <div class="form-group"><label>Nenosiri Jipya:</label><input type="password" id="newPassword" required></div>
             <div class="form-group"><label>Rudia Nenosiri Jipya:</label><input type="password" id="confirmPassword" required></div>
-            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer;">Hifadhi Nenosiri Jipya</button>
+            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer;">Hifadhi Nenosiri</button>
           </form>
         </div>
         <script>
@@ -992,7 +968,7 @@ app.get('/admin', requireWinga, async (req, res) => {
               alert(data.message);
               if (res.ok) document.getElementById('changePasswordForm').reset();
             } catch (err) {
-              alert('❌ Hitilafu ya mtandao. Jaribu tena.');
+              alert('❌ Hitilafu ya mtandao.');
             }
           });
         </script>
@@ -1006,20 +982,20 @@ app.get('/admin', requireWinga, async (req, res) => {
           <div class="stat-card"><h3>Net Profit Earned</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
         <div class="card">
-          <h2>Add New Product (Select 1 to 4 Photos)</h2>
+          <h2>Add New Product (1 to 4 Photos)</h2>
           <form action="/admin/add" method="POST" enctype="multipart/form-data">
             <div class="form-row">
               <div class="form-group"><label>Product Name</label><input type="text" name="name" required></div>
               <div class="form-group"><label>Category</label><input type="text" name="category" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Buying Price / Cost (TSh)</label><input type="number" name="buyingPrice" required></div>
+              <div class="form-group"><label>Buying Price (TSh)</label><input type="number" name="buyingPrice" required></div>
               <div class="form-group"><label>Selling Price (TSh)</label><input type="number" name="sellingPrice" required></div>
             </div>
             <div class="form-row">
               <div class="form-group"><label>Size</label><input type="text" name="size" value="Standard"></div>
               <div class="form-group">
-                <label>Product Photos (Hold Ctrl/Shift to choose up to 4)</label>
+                <label>Product Photos (Max 4)</label>
                 <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
                 <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px;"></small>
               </div>
@@ -1031,7 +1007,7 @@ app.get('/admin', requireWinga, async (req, res) => {
           function validateImages(input) {
             const notice = document.getElementById('fileCountNotice');
             if (input.files.length > 4) {
-              alert('❌ Umepitia kikomo! Unaruhusiwa kuchagua picha zisizozidi 4 pekee.');
+              alert('❌ Unaruhusiwa kuchagua picha zisizozidi 4 pekee.');
               input.value = '';
               notice.innerText = '';
             } else if (input.files.length > 0) {
@@ -1044,7 +1020,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         <div class="card">
           <h2>Customer Orders & Reviews (${orders.length})</h2>
           <table>
-            <thead><tr><th>Photo</th><th>Order #</th><th>Product</th><th>Price</th><th>Location</th><th>Phone</th><th>Status</th><th>Customer Feedback</th><th>Update Status</th></tr></thead>
+            <thead><tr><th>Photo</th><th>Order #</th><th>Product</th><th>Price</th><th>Location</th><th>Phone</th><th>Status</th><th>Feedback</th><th>Action</th></tr></thead>
             <tbody>${orderRows || '<tr><td colspan="9">No orders placed yet.</td></tr>'}</tbody>
           </table>
         </div>
@@ -1065,43 +1041,32 @@ app.get('/admin', requireWinga, async (req, res) => {
             rows.forEach(function(row) {
               var name = row.querySelector('.prod-name').innerText.toLowerCase();
               var cat = row.querySelector('.prod-cat').innerText.toLowerCase();
-              if (name.indexOf(input) !== -1 || cat.indexOf(input) !== -1) {
-                row.style.display = '';
-              } else {
-                row.style.display = 'none';
-              }
+              row.style.display = (name.indexOf(input) !== -1 || cat.indexOf(input) !== -1) ? '' : 'none';
             });
           }
         </script>
-        <div id="imgModal" onclick="closeModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); justify-content: center; align-items: center; cursor: pointer;">
-          <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
-          <img id="modalImage" style="max-width: 85%; max-height: 85%; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); object-fit: contain;">
-        </div>
-        <script>
-          function openModal(src) {
-            const modal = document.getElementById('imgModal');
-            const modalImg = document.getElementById('modalImage');
-            modalImg.src = src;
-            modal.style.display = 'flex';
-          }
-          function closeModal() {
-            document.getElementById('imgModal').style.display = 'none';
-          }
-        </script>
       </div>
+      <div id="imgModal" onclick="closeModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); justify-content: center; align-items: center; cursor: pointer;">
+        <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
+        <img id="modalImage" style="max-width: 85%; max-height: 85%; border-radius: 8px; object-fit: contain;">
+      </div>
+      <script>
+        function openModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imgModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('imgModal').style.display = 'none'; }
+      </script>
       <div id="editModal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center;">
         <div style="background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 450px;">
           <h3>✏️ Rekebisha Bidhaa</h3>
           <form action="/admin/product/edit" method="POST">
             <input type="hidden" id="editId" name="id">
             <div style="margin-bottom: 8px;"><label>Jina:</label><input type="text" id="editName" name="name" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Kipengele (Category):</label><input type="text" id="editCategory" name="category" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Bei ya Kununua (TSh):</label><input type="number" id="editBuyingPrice" name="buyingPrice" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Bei ya Kuuzia (TSh):</label><input type="number" id="editSellingPrice" name="sellingPrice" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 12px;"><label>Saizi (Size):</label><input type="text" id="editSize" name="size" style="width:100%; padding:6px;"></div>
+            <div style="margin-bottom: 8px;"><label>Kipengele:</label><input type="text" id="editCategory" name="category" style="width:100%; padding:6px;" required></div>
+            <div style="margin-bottom: 8px;"><label>Bei ya Kununua:</label><input type="number" id="editBuyingPrice" name="buyingPrice" style="width:100%; padding:6px;" required></div>
+            <div style="margin-bottom: 8px;"><label>Bei ya Kuuzia:</label><input type="number" id="editSellingPrice" name="sellingPrice" style="width:100%; padding:6px;" required></div>
+            <div style="margin-bottom: 12px;"><label>Saizi:</label><input type="text" id="editSize" name="size" style="width:100%; padding:6px;"></div>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
               <button type="button" onclick="closeEditModal()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Aghana</button>
-              <button type="submit" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Hifadhi Mabadiliko</button>
+              <button type="submit" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Hifadhi</button>
             </div>
           </form>
         </div>
@@ -1116,9 +1081,7 @@ app.get('/admin', requireWinga, async (req, res) => {
           document.getElementById('editSize').value = btn.getAttribute('data-size');
           document.getElementById('editModal').style.display = 'flex';
         }
-        function closeEditModal() {
-          document.getElementById('editModal').style.display = 'none';
-        }
+        function closeEditModal() { document.getElementById('editModal').style.display = 'none'; }
       </script>
     </body>
     </html>
@@ -1129,11 +1092,11 @@ app.get('/admin', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Add Product Route (Protected)
+// Admin Add Product Route
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
-      console.error('Upload Security Check Failed:', err.message);
+      console.error('Upload Error:', err.message);
       return res.redirect('/admin?error=upload');
     }
     try {
@@ -1167,50 +1130,42 @@ app.post('/admin/add', requireWinga, (req, res) => {
   });
 });
 
-// Delete Product (Protected with Authorization Check)
+// Delete Product
 app.post('/admin/product/delete', requireWinga, async (req, res) => {
   try {
     const { id } = req.body;
-    await db('products')
-      .where({ id: parseInt(id), wingaId: req.session.wingaId })
-      .del();
+    await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).del();
   } catch (err) {
     console.error('❌ Error deleting product:', err);
   }
   res.redirect('/admin');
 });
 
-// Edit Product (Protected with Authorization Check)
+// Edit Product
 app.post('/admin/product/edit', requireWinga, async (req, res) => {
   try {
     const { id, name, category, buyingPrice, sellingPrice, size } = req.body;
-    await db('products')
-      .where({ id: parseInt(id), wingaId: req.session.wingaId })
-      .update({
-        name: name ? name.trim() : undefined,
-        category: category ? category.trim() : undefined,
-        buyingPrice: Number(buyingPrice),
-        sellingPrice: Number(sellingPrice),
-        price: Number(sellingPrice),
-        size: size ? size.trim() : undefined
-      });
+    await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).update({
+      name: name ? name.trim() : undefined,
+      category: category ? category.trim() : undefined,
+      buyingPrice: Number(buyingPrice),
+      sellingPrice: Number(sellingPrice),
+      price: Number(sellingPrice),
+      size: size ? size.trim() : undefined
+    });
   } catch (err) {
     console.error('❌ Error updating product:', err);
   }
   res.redirect('/admin');
 });
 
-// Order Status Update (Protected with Authorization Check)
+// Order Status Update
 app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
     const { orderId, status } = req.body;
-    const order = await db('orders')
-      .where({ orderId: parseInt(orderId), wingaId: req.session.wingaId })
-      .first();
+    const order = await db('orders').where({ orderId: parseInt(orderId), wingaId: req.session.wingaId }).first();
     if (order) {
-      await db('orders')
-        .where({ orderId: parseInt(orderId), wingaId: req.session.wingaId })
-        .update({ status });
+      await db('orders').where({ orderId: parseInt(orderId), wingaId: req.session.wingaId }).update({ status });
       let customerChatId = order.senderJid;
       if (!customerChatId || !customerChatId.includes('@s.whatsapp.net')) {
         let phone = (order.customerPhone || '').trim().replace('+', '');
@@ -1224,35 +1179,29 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
           statusMessage =
             `🚚 *TAARIFA ZA ODA - DISPATCHED!* 🚚\n` +
             `-----------------------------------\n` +
-            `Habari! Oda yako imekamilika kuandaliwa na ipo njiani kuletwa kwako.\n\n` +
-            `🔖 *Namba ya Oda:* #${order.orderId}\n` +
+            `Habari! Oda yako #${order.orderId} imekamilika kuandaliwa na ipo njiani kuletwa kwako.\n\n` +
             `📦 *Bidhaa:* ${order.productName}\n` +
-            `📍 *Hali ya Oda:* 🚚 Dispatched (Ipo Njiani)\n\n` +
-            `🔗 *Fuatilia oda yako hapa kwa muda halisi:*\n${trackUrl}`;
+            `🔗 *Fuatilia hapa:*\n${trackUrl}`;
         } else if (status === 'Completed') {
           statusMessage =
             `✅ *ODA YAKO IMEMALIZIKA!* 🎉\n` +
             `-----------------------------------\n` +
-            `Habari! Bidhaa yako kwenye Oda #${order.orderId} (${order.productName}) imewasilishwa na kukamilika.\n\n` +
-            `⭐ *TAFADHALI TUPE FEEDBACK / MAONI YAKO:* ⭐\n` +
-            `1️⃣ **Kupitia Wavuti:** Bonyeza hapa kuweka nyota na maoni:\n${trackUrl}\n\n` +
-            `2️⃣ **Kupitia WhatsApp Hapa Hapa:** Jibu ujumbe huu kwa muundo huu:\n` +
-            `*!maoni ${order.orderId} [nyota 1-5] [maoni yako]*\n\n` +
-            `*Mfano:* !maoni ${order.orderId} 5 Bidhaa ni nzuri sana na huduma ni ya haraka!`;
+            `Habari! Oda #${order.orderId} (${order.productName}) imewasilishwa.\n\n` +
+            `⭐ *TOA MAONI YAKO:* ⭐\n` +
+            `*!maoni ${order.orderId} [nyota 1-5] [maoni yako]*`;
         }
         if (statusMessage) {
           await sock.sendMessage(customerChatId, { text: statusMessage });
-          console.log(`📲 Real-time status update (${status}) sent to customer JID: ${customerChatId}`);
         }
       }
     }
   } catch (err) {
-    console.error('❌ Error sending status update to customer:', err);
+    console.error('❌ Error updating status:', err);
   }
   res.redirect('/admin');
 });
 
-// Change Password Route (Protected)
+// Change Password Route
 app.post('/admin/change-password', requireWinga, async (req, res) => {
   const wingaId = req.session.wingaId;
   const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -1260,56 +1209,48 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Tafadhali jaza nafasi zote.' });
   }
   if (newPassword !== confirmPassword) {
-    return res.status(400).json({ success: false, message: 'Nenosiri jipya na la kurudia hayafanani.' });
+    return res.status(400).json({ success: false, message: 'Nenosiri jipya halifanani.' });
   }
   if (newPassword.length < 6) {
-    return res.status(400).json({ success: false, message: 'Nenosiri jipya lazima liwe na angalau herufi 6.' });
+    return res.status(400).json({ success: false, message: 'Nenosiri lazima liwe na angalau herufi 6.' });
   }
   try {
     const winga = await db('wingas').where({ id: wingaId }).first();
-    if (!winga) {
-      return res.status(404).json({ success: false, message: 'Winga hakupatikana.' });
-    }
+    if (!winga) return res.status(404).json({ success: false, message: 'Winga hakupatikana.' });
     const isValidOld = await bcrypt.compare(oldPassword, winga.password);
-    if (!isValidOld) {
-      return res.status(400).json({ success: false, message: 'Nenosiri la zamani si sahihi.' });
-    }
+    if (!isValidOld) return res.status(400).json({ success: false, message: 'Nenosiri la zamani si sahihi.' });
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
     await db('wingas').where({ id: wingaId }).update({ password: hashedNewPassword });
     return res.json({ success: true, message: '✅ Nenosiri limebadilishwa kikamilifu!' });
   } catch (err) {
-    console.error('Password change error:', err);
-    return res.status(500).json({ success: false, message: 'Hitilafu ya server imetokea.' });
+    return res.status(500).json({ success: false, message: 'Hitilafu ya server.' });
   }
 });
 
-// ==========================================
-// FORGOT & RESET PASSWORD ROUTES (WhatsApp OTP)
-// ==========================================
+// Forgot & Reset Password Routes (WhatsApp OTP)
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
   <html>
   <head>
-    <title>Umesahau Nenosiri - Winga Shop</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Umesahau Nenosiri</title>
     <style>
       body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 90%; max-width: 360px; }
+      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 320px; }
       input { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
-      button { background: #007bff; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
-      a { color: #007bff; text-decoration: none; font-size: 14px; }
+      button { background: #007bff; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; }
+      a { color: #007bff; text-decoration: none; font-size: 14px; display: block; margin-top: 15px; }
     </style>
   </head>
   <body>
     <div class="box">
       <h2>🔑 Umesahau Nenosiri?</h2>
-      <p style="color:#666; font-size:14px;">Weka namba yako ya simu. Tutatuma kodi ya uhakiki (OTP) kwenye WhatsApp yako.</p>
+      <p style="color:#666; font-size:13px;">Weka namba yako ya simu kupata OTP WhatsApp.</p>
       <form action="/forgot-password" method="POST">
-        <input type="text" name="phone" placeholder="Mfano: 0712345678" required>
-        <button type="submit">Tuma Kodi via WhatsApp</button>
+        <input type="text" name="phone" placeholder="0712345678" required>
+        <button type="submit">Tuma Kodi</button>
       </form>
-      <p style="margin-top:15px;"><a href="/login">← Rudi Kwenye Login</a></p>
+      <a href="/login">← Rudi Kwenye Login</a>
     </div>
   </body>
   </html>
@@ -1319,121 +1260,66 @@ app.get('/forgot-password', (req, res) => {
 app.post('/forgot-password', async (req, res) => {
   try {
     if (!isWhatsappReady || !sock) {
-      isWhatsappReady = false;
-      return res.status(503).send('❌ Huduma ya WhatsApp kwa sasa haipo tayari (Bot Disconnected). Tafadhali subiri sekunde chache. <br><a href="/forgot-password">Rudi Nyuma</a>');
+      return res.status(503).send('❌ WhatsApp haijawa tayari. Subiri sekunde chache. <br><a href="/forgot-password">Rudi Nyuma</a>');
     }
     const rawPhone = (req.body.phone || '').trim();
-    if (!rawPhone) {
-      return res.send('❌ Tafadhali jaza namba ya simu. <br><a href="/forgot-password">Jaribu Tena</a>');
-    }
     let cleanedPhone = rawPhone.replace(/\D/g, '');
-    if (cleanedPhone.startsWith('0')) {
-      cleanedPhone = '255' + cleanedPhone.slice(1);
-    }
-    const winga = await db('wingas')
-      .where({ phone: rawPhone })
-      .orWhere({ phone: cleanedPhone })
-      .first();
-    if (!winga) {
-      return res.send('❌ Namba hii haijasajiliwa kwenye mfumo. <br><a href="/forgot-password">Jaribu Tena</a>');
-    }
+    if (cleanedPhone.startsWith('0')) cleanedPhone = '255' + cleanedPhone.slice(1);
+    
+    const winga = await db('wingas').where({ phone: rawPhone }).orWhere({ phone: cleanedPhone }).first();
+    if (!winga) return res.send('❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>');
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db('password_resets').where({ phone: winga.phone }).del();
     await db('password_resets').insert({ phone: winga.phone, otp, expiresAt });
     
     const targetJid = `${cleanedPhone}@s.whatsapp.net`;
-    const otpMessage =
-      `🔑 *KODI YA KUBADILISHA NENOSIRI (PASSWORD RESET)*\n` +
-      `-----------------------------------\n` +
-      `Habari *${winga.name}*, kodi yako ya kubadilisha nenosiri ni:\n\n` +
-      `👉 *${otp}*\n\n` +
-      `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10.`;
-      
-    await sock.sendMessage(targetJid, { text: otpMessage });
+    await sock.sendMessage(targetJid, { text: `🔑 Kodi yako ya OTP ni: *${otp}* (Inaisha baada ya dakika 10).` });
+
     res.send(`
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Reset Password - Winga Shop</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>
-        body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 90%; max-width: 360px; }
-        input { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
-        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
+    <head><title>Reset</title></head>
+    <body style="font-family:sans-serif; background:rgb(106, 136, 232); display:flex; justify-content:center; align-items:center; height:100vh; margin:0;">
+      <div style="background:white; padding:30px; border-radius:8px; text-align:center; width:320px;">
         <h2>🔐 Weka Nenosiri Jipya</h2>
-        <p style="color:#28a745; font-size:13px; font-weight:bold;">✅ Kodi ya OTP imetumwa kwenye WhatsApp yako (${escapeHtml(winga.phone)})</p>
         <form action="/reset-password" method="POST">
           <input type="hidden" name="phone" value="${escapeHtml(winga.phone)}">
-          <input type="text" name="otp" placeholder="Ingiza Kodi ya OTP (Digit 6)" required>
-          <input type="password" name="newPassword" placeholder="Nenosiri Jipya" required minlength="6">
-          <input type="password" name="confirmPassword" placeholder="Rudia Nenosiri Jipya" required minlength="6">
-          <button type="submit">Hifadhi Nenosiri Jipya</button>
+          <input type="text" name="otp" placeholder="Kodi ya OTP" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
+          <input type="password" name="newPassword" placeholder="Nenosiri Jipya" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
+          <input type="password" name="confirmPassword" placeholder="Rudia Nenosiri Jipya" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
+          <button type="submit" style="background:#28a745; color:white; border:none; padding:10px; width:100%; font-weight:bold; cursor:pointer; border-radius:4px;">Hifadhi</button>
         </form>
       </div>
     </body>
     </html>
     `);
   } catch (err) {
-    console.error('CRITICAL ERROR sending OTP via WhatsApp:', err);
-    res.status(500).send(`❌ Hitilafu imetokea wakati wa kutuma kodi: ${err.message}.`);
+    res.status(500).send(`❌ Hitilafu: ${err.message}`);
   }
 });
 
 app.post('/reset-password', async (req, res) => {
   try {
     const { phone, otp, newPassword, confirmPassword } = req.body;
-    if (!phone || !otp || !newPassword || !confirmPassword) {
-      return res.send('❌ Tafadhali jaza nafasi zote. <br><a href="/forgot-password">Jaribu Tena</a>');
+    if (newPassword !== confirmPassword || newPassword.length < 6) {
+      return res.send('❌ Nenosiri hazifanani au ni fupi mno. <br><a href="/forgot-password">Jaribu Tena</a>');
     }
-    if (newPassword !== confirmPassword) {
-      return res.send('❌ Nenosiri jipya na la kurudia hayafanani. <br><a href="/forgot-password">Jaribu Tena</a>');
-    }
-    if (newPassword.length < 6) {
-      return res.send('❌ Nenosiri lazima liwe na angalau herufi 6. <br><a href="/forgot-password">Jaribu Tena</a>');
-    }
-    const resetRecord = await db('password_resets')
-      .where({ phone: phone.trim(), otp: otp.trim() })
-      .where('expiresAt', '>', new Date())
-      .first();
-    if (!resetRecord) {
-      return res.send('❌ Kodi ya OTP si sahihi au imeisha muda wake (Expired). <br><a href="/forgot-password">Omba Kodi Mpya</a>');
-    }
+    const resetRecord = await db('password_resets').where({ phone: phone.trim(), otp: otp.trim() }).where('expiresAt', '>', new Date()).first();
+    if (!resetRecord) return res.send('❌ Kodi si sahihi au imeisha muda wake. <br><a href="/forgot-password">Omba Mpya</a>');
+    
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
     await db('wingas').where({ phone: phone.trim() }).update({ password: hashedPassword });
     await db('password_resets').where({ phone: phone.trim() }).del();
-    res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Mafanikio - Winga Shop</title>
-      <style>
-        body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .box { background: white; padding: 40px; border-radius: 8px; text-align: center; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        a { display: inline-block; margin-top: 15px; padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
-        <h2 style="color:#28a745;">🎉 Hongera!</h2>
-        <p>Nenosiri lako limebadilishwa kikamilifu. Sasa unaweza kuingia kwenye Dashboard yako.</p>
-        <a href="/login">Ingia Dashboard (Login)</a>
-      </div>
-    </body>
-    </html>
-    `);
+    
+    res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif;"><h2 style="color:#28a745;">🎉 Hongera!</h2><p>Nenosiri limebadilishwa.</p><a href="/login">Ingia Login</a></div>`);
   } catch (err) {
-    console.error('Reset password error:', err);
     res.status(500).send('❌ Hitilafu ya Server.');
   }
 });
 
-// Super Admin Routes (Database Backed)
+// Super Admin Routes
 app.get('/superadmin', async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -1491,11 +1377,6 @@ app.get('/superadmin', async (req, res) => {
               <input type="hidden" name="wingaId" value="${w.id}">
               <button type="submit" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">+30 Days</button>
             </form>
-            <form action="/superadmin/winga/reset-password" method="POST" style="display:inline-flex; gap:4px;">
-              <input type="hidden" name="wingaId" value="${w.id}">
-              <input type="password" name="newPassword" placeholder="New Pass" style="padding:2px 5px; width:80px; font-size:11px;" required>
-              <button type="submit" style="background:#ffc107; color:black; border:none; padding:4px 6px; border-radius:4px; font-size:11px; cursor:pointer;">Reset</button>
-            </form>
           </div>
         </td>
       </tr>`;
@@ -1512,11 +1393,9 @@ app.get('/superadmin', async (req, res) => {
         <td>${mainImg}</td>
         <td class="sprod-name">${escapeHtml(p.name)}</td>
         <td><strong>${escapeHtml(sellerName)}</strong></td>
-        <td>${escapeHtml(p.category || 'General')}</td>
         <td>TSh ${Number(p.sellingPrice || 0).toLocaleString()}</td>
-        <td>${p.dateAdded ? new Date(p.dateAdded).toLocaleDateString() : 'N/A'}</td>
         <td>
-          <form action="/superadmin/product/delete" method="POST" onsubmit="return confirm('ADMIN WARNING: Are you sure you want to delete this product?');" style="display:inline;">
+          <form action="/superadmin/product/delete" method="POST" onsubmit="return confirm('Futa bidhaa hii?');" style="display:inline;">
             <input type="hidden" name="id" value="${p.id}">
             <button type="submit" style="background:#dc3545; color:white; border:none; padding:5px 10px; border-radius:4px; font-size:11px; font-weight:bold; cursor:pointer;">🗑️ Delete</button>
           </form>
@@ -1536,7 +1415,6 @@ app.get('/superadmin', async (req, res) => {
         <td>${escapeHtml(prodName)}</td>
         <td>${'⭐'.repeat(rev.rating)} (${rev.rating}/5)</td>
         <td>"${escapeHtml(rev.comment)}"</td>
-        <td>${rev.date ? new Date(rev.date).toLocaleDateString() : 'N/A'}</td>
       </tr>`;
     }).join('');
 
@@ -1572,73 +1450,46 @@ app.get('/superadmin', async (req, res) => {
         <div class="card">
           <h2>➕ Register a New Winga</h2>
           <form action="/superadmin/add-winga" method="POST" style="display:flex; gap:10px;">
-            <input type="text" name="name" placeholder="Winga/Business Name" required>
-            <input type="text" name="phone" placeholder="Phone Number" required>
-            <input type="password" name="password" placeholder="Initial Password (default: 123456)">
-            <button type="submit">Register Winga</button>
+            <input type="text" name="name" placeholder="Winga Name" required>
+            <input type="text" name="phone" placeholder="Phone" required>
+            <input type="password" name="password" placeholder="Password (def: 123456)">
+            <button type="submit">Register</button>
           </form>
         </div>
         <div class="card">
-          <h2>🏢 Wingas Performance Directory</h2>
+          <h2>🏢 Wingas Directory</h2>
           <table>
-            <thead>
-              <tr><th>ID</th><th>Winga Name</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Total Profit</th><th>Actions</th></tr>
-            </thead>
-            <tbody>${wingaRows || '<tr><td colspan="9">No wingas registered yet.</td></tr>'}</tbody>
+            <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
+            <tbody>${wingaRows || '<tr><td colspan="9">No wingas registered.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="card">
-          <h2>💬 All Customer Reviews & Feedback (${reviews.length})</h2>
+          <h2>💬 Customer Reviews (${reviews.length})</h2>
           <table>
-            <thead>
-              <tr><th>Order #</th><th>Shop/Winga</th><th>Product</th><th>Rating</th><th>Comment</th><th>Date</th></tr>
-            </thead>
-            <tbody>${superadminFeedbackRows || '<tr><td colspan="6">No customer reviews submitted yet.</td></tr>'}</tbody>
+            <thead><tr><th>Order #</th><th>Shop</th><th>Product</th><th>Rating</th><th>Comment</th></tr></thead>
+            <tbody>${superadminFeedbackRows || '<tr><td colspan="5">No reviews.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <h2>📦 Platform Product Moderation (${products.length} Total Items)</h2>
-            <input type="text" id="superSearchInput" onkeyup="filterSuperadminProducts()" placeholder="🔍 Search all products by name..." style="padding:8px 12px; border:1px solid #ccc; border-radius:4px;">
-          </div>
+          <h2>📦 Product Moderation (${products.length})</h2>
           <table>
-            <thead>
-              <tr><th>ID</th><th>Photo</th><th>Product Name</th><th>Seller Shop</th><th>Category</th><th>Price</th><th>Date Added</th><th>Action</th></tr>
-            </thead>
-            <tbody id="superadminProductTable">${superadminProductRows || '<tr><td colspan="8">No products uploaded across the platform.</td></tr>'}</tbody>
+            <thead><tr><th>ID</th><th>Photo</th><th>Name</th><th>Seller</th><th>Price</th><th>Action</th></tr></thead>
+            <tbody>${superadminProductRows || '<tr><td colspan="6">No products.</td></tr>'}</tbody>
           </table>
         </div>
-        <script>
-          function filterSuperadminProducts() {
-            var input = document.getElementById('superSearchInput').value.toLowerCase().trim();
-            var rows = document.querySelectorAll('#superadminProductTable tr.super-prod-row');
-            rows.forEach(function(row) {
-              var name = row.querySelector('.sprod-name').innerText.toLowerCase();
-              if (name.indexOf(input) !== -1) {
-                row.style.display = '';
-              } else {
-                row.style.display = 'none';
-              }
-            });
-          }
-        </script>
       </div>
     </body>
     </html>
     `);
   } catch (err) {
-    console.error('Superadmin view error:', err);
-    res.status(500).send('Hitilafu kwenye Superadmin Portal.');
+    res.status(500).send('Hitilafu kwenye Superadmin.');
   }
 });
 
 app.post('/superadmin/product/delete', async (req, res) => {
   try {
-    const { id } = req.body;
-    await db('products').where({ id: parseInt(id) }).del();
-  } catch (err) {
-    console.error('❌ Error deleting product by Superadmin:', err);
-  }
+    await db('products').where({ id: parseInt(req.body.id) }).del();
+  } catch (err) {}
   res.redirect('/superadmin');
 });
 
@@ -1647,66 +1498,31 @@ app.post('/superadmin/add-winga', async (req, res) => {
     const name = (req.body.name || '').trim();
     const phone = (req.body.phone || '').trim();
     const rawPassword = (req.body.password || '123456').trim();
-    if (!name || !phone) {
-      return res.send('❌ Tafadhali jaza jina na namba ya simu. <br><a href="/superadmin">Rudi</a>');
-    }
+    if (!name || !phone) return res.redirect('/superadmin');
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + 30);
-    await db('wingas').insert({
-      name,
-      phone,
-      password: hashedPassword,
-      status: 'active',
-      expiryDate: expiry,
-      dateAdded: new Date()
-    });
-    res.redirect('/superadmin');
-  } catch (err) {
-    console.error('Add winga error:', err);
-    res.send('❌ Impose: Phone number might already exist.');
-  }
+    await db('wingas').insert({ name, phone, password: hashedPassword, status: 'active', expiryDate: expiry, dateAdded: new Date() });
+  } catch (err) {}
+  res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/status', async (req, res) => {
   try {
-    const { wingaId, status } = req.body;
-    await db('wingas').where({ id: parseInt(wingaId) }).update({ status });
-  } catch (err) {
-    console.error('Update winga status error:', err);
-  }
+    await db('wingas').where({ id: parseInt(req.body.wingaId) }).update({ status: req.body.status });
+  } catch (err) {}
   res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/extend', async (req, res) => {
   try {
-    const { wingaId } = req.body;
-    const winga = await db('wingas').where({ id: parseInt(wingaId) }).first();
+    const winga = await db('wingas').where({ id: parseInt(req.body.wingaId) }).first();
     if (winga) {
-      const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date())
-        ? new Date(winga.expiryDate)
-        : new Date();
+      const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
       baseDate.setDate(baseDate.getDate() + 30);
-      await db('wingas').where({ id: parseInt(wingaId) }).update({
-        expiryDate: baseDate,
-        status: 'active'
-      });
+      await db('wingas').where({ id: parseInt(req.body.wingaId) }).update({ expiryDate: baseDate, status: 'active' });
     }
-  } catch (err) {
-    console.error('Extend winga error:', err);
-  }
-  res.redirect('/superadmin');
-});
-
-app.post('/superadmin/winga/reset-password', async (req, res) => {
-  try {
-    const { wingaId, newPassword } = req.body;
-    if (!wingaId || !newPassword) return res.redirect('/superadmin');
-    const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
-    await db('wingas').where({ id: parseInt(wingaId) }).update({ password: hashedPassword });
-  } catch (err) {
-    console.error('Superadmin reset password error:', err);
-  }
+  } catch (err) {}
   res.redirect('/superadmin');
 });
 
@@ -1724,18 +1540,12 @@ cron.schedule('0 8 * * *', async () => {
       const chatId = formattedPhone + '@s.whatsapp.net';
       if (daysLeft <= 0 && w.status === 'active') {
         await db('wingas').where({ id: w.id }).update({ status: 'suspended' });
-        try {
-          await sock.sendMessage(chatId, { text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa malipo umekwisha.` });
-        } catch (err) { console.error('Notification failed:', w.phone); }
+        try { await sock.sendMessage(chatId, { text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa malipo umekwisha.` }); } catch (e) {}
       } else if (daysLeft === 3 && w.status === 'active') {
-        try {
-          await sock.sendMessage(chatId, { text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako itasitishwa ndani ya siku 3.` });
-        } catch (err) { console.error('Notification failed:', w.phone); }
+        try { await sock.sendMessage(chatId, { text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako itasitishwa ndani ya siku 3.` }); } catch (e) {}
       }
     }
-  } catch (cronErr) {
-    console.error('Cron Job Execution Error:', cronErr);
-  }
+  } catch (err) { console.error('Cron error:', err); }
 });
 
 // Start Express Server & Initialize Baileys Bot
