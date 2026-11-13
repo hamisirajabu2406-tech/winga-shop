@@ -2,15 +2,7 @@ require('dotenv').config();
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
-let Client, LocalAuth, MessageMedia;
-try {
-  const wwjs = require('whatsapp-web.js');
-  Client = wwjs.Client;
-  LocalAuth = wwjs.LocalAuth;
-  MessageMedia = wwjs.MessageMedia;
-} catch (e) {
-  console.warn('⚠️ whatsapp-web.js not fully loaded or platform mismatch.');
-}
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
@@ -25,37 +17,30 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Global State Flags
 let isWhatsappReady = false;
-let client = null;
 
-// Initialize WhatsApp Web Client safely
-if (Client) {
-  try {
-    client = new Client({
-      authStrategy: new LocalAuth(),
-      webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018944747-alpha.html'
-      },
-      puppeteer: {
-        headless: true,
-        executablePath: fs.existsSync('/usr/bin/google-chrome-stable') ? '/usr/bin/google-chrome-stable' : undefined,
-        protocolTimeout: 0,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--dns-result-prefetch-tries=1'
-        ]
-      }
-    });
-  } catch (err) {
-    console.error('❌ Failed to initialize WhatsApp client instance:', err);
+// Initialize WhatsApp Web Client
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018944747-alpha.html'
+  },
+  puppeteer: {
+    headless: true,
+    executablePath: fs.existsSync('/usr/bin/google-chrome-stable') ? '/usr/bin/google-chrome-stable' : undefined,
+    protocolTimeout: 0,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--dns-result-prefetch-tries=1'
+    ]
   }
-}
+});
 
 // Production Environment Checks
 if (process.env.NODE_ENV === 'production') {
@@ -185,7 +170,7 @@ async function notifyShopCustomers(winga, newProduct) {
       `🔗 *Tazama na uagize hapa:*\n${BASE_URL}/catalog?shop=${winga.id}`;
     for (const jid of customerJids) {
       try {
-        if (firstImage && fs.existsSync(firstImage) && MessageMedia) {
+        if (firstImage && fs.existsSync(firstImage)) {
           const media = MessageMedia.fromFilePath(firstImage);
           await client.sendMessage(jid, media, { caption: alertMsg });
         } else {
@@ -228,7 +213,7 @@ async function notifyWinga(order, product) {
       targetFilePath = path.join(UPLOADS_DIR, fileName);
     }
     let imageSent = false;
-    if (targetFilePath && fs.existsSync(targetFilePath) && MessageMedia) {
+    if (targetFilePath && fs.existsSync(targetFilePath)) {
       const media = MessageMedia.fromFilePath(targetFilePath);
       await client.sendMessage(wingaChatId, media, { caption: alertMessage });
       imageSent = true;
@@ -236,17 +221,41 @@ async function notifyWinga(order, product) {
     if (!imageSent) {
       await client.sendMessage(wingaChatId, alertMessage);
     }
+    console.log(`📲 WhatsApp alert sent to Winga: ${winga.name} (${phone})`);
   } catch (err) {
     console.error('❌ Failed to send alert to Winga:', err);
   }
 }
+
+// Express Route: LocalStorage Sync Endpoint
+app.post('/api/sync-localStorage', async (req, res) => {
+  const { products } = req.body;
+  try {
+    if (Array.isArray(products)) {
+      for (const p of products) {
+        await db('products').insert({
+          wingaId: p.wingaId || 1,
+          name: p.name,
+          category: p.category || 'General',
+          buyingPrice: p.buyingPrice || 0,
+          sellingPrice: p.sellingPrice || p.price || 0,
+          price: p.sellingPrice || p.price || 0,
+          imageUrl: p.imageUrl || ''
+        }).onConflict('id').merge();
+      }
+    }
+    res.json({ success: true, message: 'LocalStorage items migrated to MySQL.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Landing Page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Public Catalog Route (Database Backed)
+// Public Catalog Route
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -478,7 +487,7 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Order Tracking Routes (Database Backed)
+// Order Tracking Routes
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -607,7 +616,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Winga Login Routes (Pamoja na Link ya Kujisajili / Register)
+// Winga Login Routes
 app.get('/login', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -664,7 +673,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Register Routes (Kujisajili Mwenyewe)
+// Winga Register Routes
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -709,7 +718,7 @@ app.post('/register', async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
     const expiry = new Date();
-    expiry.setDate(expiry.getDate() + 30); // Siku 30 za majaribio au mwanzo
+    expiry.setDate(expiry.getDate() + 30);
     await db('wingas').insert({
       name,
       phone,
@@ -746,7 +755,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga (Protected via Middleware)
+// Admin Dashboard for Winga
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1075,7 +1084,7 @@ app.get('/admin', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Add Product Route (Protected)
+// Admin Add Product Route
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -1113,7 +1122,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
   });
 });
 
-// Delete Product (Protected with Authorization Check)
+// Delete Product
 app.post('/admin/product/delete', requireWinga, async (req, res) => {
   try {
     const { id } = req.body;
@@ -1126,7 +1135,7 @@ app.post('/admin/product/delete', requireWinga, async (req, res) => {
   res.redirect('/admin');
 });
 
-// Edit Product (Protected with Authorization Check)
+// Edit Product
 app.post('/admin/product/edit', requireWinga, async (req, res) => {
   try {
     const { id, name, category, buyingPrice, sellingPrice, size } = req.body;
@@ -1146,7 +1155,7 @@ app.post('/admin/product/edit', requireWinga, async (req, res) => {
   res.redirect('/admin');
 });
 
-// Order Status Update (Protected with Authorization Check)
+// Order Status Update
 app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
     const { orderId, status } = req.body;
@@ -1188,6 +1197,7 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
         }
         if (statusMessage) {
           await client.sendMessage(customerChatId, statusMessage);
+          console.log(`📲 Real-time status update (${status}) sent to customer JID: ${customerChatId}`);
         }
       }
     }
@@ -1197,7 +1207,7 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
   res.redirect('/admin');
 });
 
-// Change Password Route (Protected)
+// Change Password Route
 app.post('/admin/change-password', requireWinga, async (req, res) => {
   const wingaId = req.session.wingaId;
   const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -1292,7 +1302,7 @@ app.post('/forgot-password', async (req, res) => {
       `-----------------------------------\n` +
       `Habari *${winga.name}*, kodi yako ya kubadilisha nenosiri ni:\n\n` +
       `👉 *${otp}*\n\n` +
-      `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10.`;
+      `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10. Kama hukuomba mabadiliko haya, puzia ujumbe huu.`;
     await client.sendMessage(targetJid, otpMessage);
     res.send(`
     <!DOCTYPE html>
@@ -1324,7 +1334,10 @@ app.post('/forgot-password', async (req, res) => {
     `);
   } catch (err) {
     console.error('CRITICAL ERROR sending OTP via WhatsApp:', err);
-    res.status(500).send(`❌ Hitilafu imetokea wakati wa kutuma kodi.`);
+    if (err.message && err.message.includes('evaluate')) {
+      isWhatsappReady = false;
+    }
+    res.status(500).send(`❌ Hitilafu imetokea wakati wa kutuma kodi: ${err.message}. Tafadhali jaribu tena baada ya sekunde chache.`);
   }
 });
 
@@ -1353,12 +1366,19 @@ app.post('/reset-password', async (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html>
-    <head><title>Mafanikio</title></head>
-    <body style="font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-      <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; max-width: 380px;">
+    <head>
+      <title>Mafanikio - Winga Shop</title>
+      <style>
+        body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .box { background: white; padding: 40px; border-radius: 8px; text-align: center; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        a { display: inline-block; margin-top: 15px; padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <div class="box">
         <h2 style="color:#28a745;">🎉 Hongera!</h2>
-        <p>Nenosiri lako limebadilishwa kikamilifu.</p>
-        <a href="/login" style="display:inline-block; margin-top:15px; padding:12px 24px; background:#28a745; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">Ingia Dashboard</a>
+        <p>Nenosiri lako limebadilishwa kikamilifu. Sasa unaweza kuingia kwenye Dashboard yako.</p>
+        <a href="/login">Ingia Dashboard (Login)</a>
       </div>
     </body>
     </html>
@@ -1541,6 +1561,20 @@ app.get('/superadmin', async (req, res) => {
             <tbody id="superadminProductTable">${superadminProductRows || '<tr><td colspan="8">No products uploaded across the platform.</td></tr>'}</tbody>
           </table>
         </div>
+        <script>
+          function filterSuperadminProducts() {
+            var input = document.getElementById('superSearchInput').value.toLowerCase().trim();
+            var rows = document.querySelectorAll('#superadminProductTable tr.super-prod-row');
+            rows.forEach(function(row) {
+              var name = row.querySelector('.sprod-name').innerText.toLowerCase();
+              if (name.indexOf(input) !== -1) {
+                row.style.display = '';
+              } else {
+                row.style.display = 'none';
+              }
+            });
+          }
+        </script>
       </div>
     </body>
     </html>
@@ -1629,126 +1663,182 @@ app.post('/superadmin/winga/reset-password', async (req, res) => {
   res.redirect('/superadmin');
 });
 
-// WhatsApp Bot Safe Initialization & Event Listeners
-if (client) {
-  client.on('qr', (qr) => {
-    console.log('⚡ Scan this QR Code with WhatsApp:');
-    qrcode.generate(qr, { small: true });
-  });
+// WhatsApp Bot Event Listeners
+client.on('qr', (qr) => {
+  console.log('⚡ Scan this QR Code with WhatsApp:');
+  qrcode.generate(qr, { small: true });
+});
 
-  client.on('ready', () => {
-    console.log('✅ Winga WhatsApp Bot is connected and live!');
-    isWhatsappReady = true;
-  });
+client.on('ready', () => {
+  console.log('✅ Winga WhatsApp Bot is connected and live!');
+  isWhatsappReady = true;
+});
 
-  client.on('message', async (msg) => {
-    try {
-      const text = (msg.body || '').trim();
-      const lowerText = text.toLowerCase();
-      
-      if (lowerText.startsWith('!maoni')) {
-        const parts = text.split(/\s+/);
-        const orderId = parseInt(parts[1]);
-        const rating = parseInt(parts[2]);
-        const comment = parts.slice(3).join(' ');
-        if (!orderId || isNaN(rating) || rating < 1 || rating > 5 || !comment) {
-          await msg.reply('❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*');
-          return;
-        }
-        const orderExists = await db('orders').where({ orderId }).first();
-        if (!orderExists) {
-          await msg.reply(`❌ Haikuwezekana kupata Oda #${orderId}.`);
-          return;
-        }
-        const existingReview = await db('reviews').where({ orderId }).first();
-        if (existingReview) {
-          await db('reviews').where({ orderId }).update({ rating, comment: comment.trim(), date: new Date() });
-        } else {
-          await db('reviews').insert({ orderId, rating, comment: comment.trim(), date: new Date() });
-        }
-        await msg.reply(`🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐`);
+client.on('authenticated', () => {
+  console.log('🔒 WhatsApp client authenticated');
+});
+
+client.on('auth_failure', (msg) => {
+  console.error('❌ WhatsApp authentication failure:', msg);
+  isWhatsappReady = false;
+});
+
+client.on('disconnected', (reason) => {
+  console.warn('⚠️ WhatsApp client disconnected:', reason);
+  isWhatsappReady = false;
+  client.initialize();
+});
+
+// Daily Cron Job for Subscriptions
+cron.schedule('0 8 * * *', async () => {
+  try {
+    if (!isWhatsappReady || !client || !client.pupPage) return;
+    const wingas = await db('wingas').select('*');
+    const now = new Date();
+    for (let w of wingas) {
+      if (!w.expiryDate) continue;
+      const expiry = new Date(w.expiryDate);
+      const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+      const formattedPhone = w.phone.startsWith('0') ? '255' + w.phone.slice(1) : w.phone;
+      const chatId = formattedPhone + '@c.us';
+      if (daysLeft <= 0 && w.status === 'active') {
+        await db('wingas').where({ id: w.id }).update({ status: 'suspended' });
+        try {
+          await client.sendMessage(chatId, `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa malipo umekwisha.`);
+        } catch (err) { console.error('Notification failed:', w.phone); }
+      } else if (daysLeft === 3 && w.status === 'active') {
+        try {
+          await client.sendMessage(chatId, `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako itasitishwa ndani ya siku 3.`);
+        } catch (err) { console.error('Notification failed:', w.phone); }
+      }
+    }
+  } catch (cronErr) {
+    console.error('Cron Job Execution Error:', cronErr);
+  }
+});
+
+// Bot Message Processing Handler
+client.on('message', async (msg) => {
+  try {
+    const text = (msg.body || '').trim();
+    const lowerText = text.toLowerCase();
+    
+    // 1. WhatsApp Instant Review/Feedback Handler (!maoni)
+    if (lowerText.startsWith('!maoni')) {
+      const parts = text.split(/\s+/);
+      const orderId = parseInt(parts[1]);
+      const rating = parseInt(parts[2]);
+      const comment = parts.slice(3).join(' ');
+      if (!orderId || isNaN(rating) || rating < 1 || rating > 5 || !comment) {
+        await msg.reply('❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*\n\nMfano:\n*!maoni 1 5 Nguo ni nzuri sana!*');
         return;
       }
+      const orderExists = await db('orders').where({ orderId }).first();
+      if (!orderExists) {
+        await msg.reply(`❌ Haikuwezekana kupata Oda #${orderId}. Tafadhali hakikisha namba ya oda ni sahihi.`);
+        return;
+      }
+      const existingReview = await db('reviews').where({ orderId }).first();
+      if (existingReview) {
+        await db('reviews').where({ orderId }).update({
+          rating,
+          comment: comment.trim(),
+          date: new Date()
+        });
+      } else {
+        await db('reviews').insert({
+          orderId,
+          rating,
+          comment: comment.trim(),
+          date: new Date()
+        });
+      }
+      await msg.reply(`🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.\nMaoni yako yamesaidia sana kuboresha huduma zetu!`);
+      return;
+    }
 
-      if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
-        let productID = null;
-        let location = 'Haikutajwa';
-        let phone = msg.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
-        if (text.includes('|')) {
-          const payload = text.slice(7).split('|');
-          productID = parseInt(payload[0].trim());
-          if (payload[1]) location = payload[1].trim();
-          if (payload[2]) phone = payload[2].trim();
-        } else {
-          const lines = text.split(/\r?\n/);
-          const firstLine = lines[0].trim();
-          const parts = firstLine.split(/\s+/);
-          if (parts[1]) productID = parseInt(parts[1]);
-          for (let line of lines) {
-            const trimmed = line.trim();
-            const lower = trimmed.toLowerCase();
-            if (lower.includes('simu:')) {
-              const extractedPhone = trimmed.split(/simu:/i)[1].trim();
-              if (extractedPhone && extractedPhone !== 'haikutajwa') phone = extractedPhone;
-            }
-            if (lower.includes('eneo:')) {
-              const extractedLocation = trimmed.split(/eneo:/i)[1].trim();
-              if (extractedLocation && extractedLocation !== 'haikutajwa') location = extractedLocation;
-            }
+    // 2. Order Command (!agiza / !order)
+    if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
+      let productID = null;
+      let location = 'Haikutajwa';
+      let phone = msg.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
+      if (text.includes('|')) {
+        const payload = text.slice(7).split('|');
+        productID = parseInt(payload[0].trim());
+        if (payload[1]) location = payload[1].trim();
+        if (payload[2]) phone = payload[2].trim();
+      } else {
+        const lines = text.split(/\r?\n/);
+        const firstLine = lines[0].trim();
+        const parts = firstLine.split(/\s+/);
+        if (parts[1]) productID = parseInt(parts[1]);
+        for (let line of lines) {
+          const trimmed = line.trim();
+          const lower = trimmed.toLowerCase();
+          if (lower.includes('simu:')) {
+            const extractedPhone = trimmed.split(/simu:/i)[1].trim();
+            if (extractedPhone && extractedPhone !== 'haikutajwa') phone = extractedPhone;
+          }
+          if (lower.includes('eneo:')) {
+            const extractedLocation = trimmed.split(/eneo:/i)[1].trim();
+            if (extractedLocation && extractedLocation !== 'haikutajwa') location = extractedLocation;
           }
         }
-        const product = await db('products').where({ id: productID }).first();
-        if (!product) {
-          await msg.reply(`❌ Bidhaa #${productID} haipo.`);
-          return;
-        }
-        const maxResult = await db('orders').max('orderId as maxId').first();
-        const nextOrderId = (maxResult && maxResult.maxId ? maxResult.maxId : 0) + 1;
-        const newOrder = {
-          orderId: nextOrderId,
-          wingaId: product.wingaId || 1,
-          productName: product.name,
-          buyingPrice: Number(product.buyingPrice || 0),
-          sellingPrice: Number(product.sellingPrice || product.price || 0),
-          customerPhone: phone,
-          location: location,
-          senderJid: msg.from,
-          status: 'Pending',
-          date: new Date()
-        };
-        await db('orders').insert(newOrder);
-        const trackUrl = `${BASE_URL}/track?id=${newOrder.orderId}`;
-        await msg.reply(
-          `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
-          `🔖 *Oda:* #${newOrder.orderId}\n` +
-          `📦 *Bidhaa:* ${product.name}\n` +
-          `💰 *Bei:* TSh ${newOrder.sellingPrice.toLocaleString()}\n` +
-          `📞 *Simu:* ${phone}\n` +
-          `📍 *Eneo:* ${location}\n\n` +
-          `📍 *Fuatilia Oda Yako Hapa:*\n${trackUrl}`
-        );
-        notifyWinga(newOrder, product);
+      }
+      const product = await db('products').where({ id: productID }).first();
+      if (!product) {
+        await msg.reply(`❌ Bidhaa #${productID} haipo.`);
         return;
       }
-    } catch (err) {
-      console.error('Handler error:', err);
+      const maxResult = await db('orders').max('orderId as maxId').first();
+      const nextOrderId = (maxResult && maxResult.maxId ? maxResult.maxId : 0) + 1;
+      const newOrder = {
+        orderId: nextOrderId,
+        wingaId: product.wingaId || 1,
+        productName: product.name,
+        buyingPrice: Number(product.buyingPrice || 0),
+        sellingPrice: Number(product.sellingPrice || product.price || 0),
+        customerPhone: phone,
+        location: location,
+        senderJid: msg.from,
+        status: 'Pending',
+        date: new Date()
+      };
+      await db('orders').insert(newOrder);
+      const trackUrl = `${BASE_URL}/track?id=${newOrder.orderId}`;
+      await msg.reply(
+        `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
+        `🔖 *Oda:* #${newOrder.orderId}\n` +
+        `📦 *Bidhaa:* ${product.name}\n` +
+        `💰 *Bei:* TSh ${newOrder.sellingPrice.toLocaleString()}\n` +
+        `📞 *Simu:* ${phone}\n` +
+        `📍 *Eneo:* ${location}\n` +
+        `📌 *Status:* 🟡 Pending\n\n` +
+        `📍 *Fuatilia Oda Yako Hapa:*\n${trackUrl}`
+      );
+      notifyWinga(newOrder, product);
+      return;
     }
-  });
-}
 
-// Start Server and initialize bot safely
-app.listen(PORT, async () => {
-  try {
-    await db.raw('SELECT 1');
-    console.log(`🌐 Server active on ${BASE_URL}`);
-    if (client) {
-      try {
-        client.initialize();
-      } catch (err) {
-        console.warn('⚠️ WhatsApp client initialization deferred:', err.message);
-      }
+    // 3. Greeting Keywords
+    const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
+    const isGreeting = greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '));
+    if (isGreeting) {
+      const catalogUrl = `${BASE_URL}/catalog`;
+      await msg.reply(`Karibu WingaShop! 👋\n\nTazama na utafute nguo zetu hapa:\n${catalogUrl}`);
+      return;
     }
   } catch (err) {
-    console.error('❌ Database connection failed:', err);
+    console.error('Handler error:', err);
+  }
+});
+
+// Start Server and Initialize WhatsApp Client
+app.listen(PORT, () => {
+  console.log(`🌐 Server active on ${BASE_URL}`);
+  try {
+    client.initialize();
+  } catch (err) {
+    console.warn('⚠️ WhatsApp initialization warning:', err.message);
   }
 });
