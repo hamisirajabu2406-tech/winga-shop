@@ -754,7 +754,7 @@ app.post('/login', async (req, res) => {
       if (isPasswordValid) {
         req.session.wingaId = matchedWinga.id;
         req.session.wingaName = matchedWinga.name;
-        return req.redirect('/admin');
+        return res.redirect('/admin'); // 👈 Hapa lazima iwe res.redirect badala ya req.redirect
       }
     }
     res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
