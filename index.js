@@ -819,7 +819,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga (With Subscription Countdown & Chart.js Analytics)
+// Admin Dashboard for Winga (With Subscription Countdown, Chart.js Analytics & Invoice Download)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -859,7 +859,7 @@ app.get('/admin', requireWinga, async (req, res) => {
       } else {
         subscriptionBanner = `
         <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
-          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inაisha tarehe: <strong>${formattedExpiry}</strong>).
+          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>).
         </div>`;
       }
     }
@@ -968,11 +968,14 @@ app.get('/admin', requireWinga, async (req, res) => {
         <td><span style="padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
         <td>${reviewCell}</td>
         <td>
-          <form action="/admin/order/status" method="POST" style="display:inline-flex; gap: 4px;">
-            <input type="hidden" name="orderId" value="${o.orderId}">
-            ${currentStatus !== 'Dispatched' && currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Dispatched" style="background:#17a2b8; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🚚 Dispatch</button>` : ''}
-            ${currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Completed" style="background:#28a745; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✅ Complete</button>` : ''}
-          </form>
+          <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+            <a href="/admin/order/invoice?id=${o.orderId}" target="_blank" style="background:#6c757d; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none; font-weight:bold;">📄 Risiti</a>
+            <form action="/admin/order/status" method="POST" style="display:inline-flex; gap: 4px;">
+              <input type="hidden" name="orderId" value="${o.orderId}">
+              ${currentStatus !== 'Dispatched' && currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Dispatched" style="background:#17a2b8; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🚚 Dispatch</button>` : ''}
+              ${currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Completed" style="background:#28a745; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✅ Complete</button>` : ''}
+            </form>
+          </div>
         </td>
       </tr>`;
     }).join('');
@@ -1189,6 +1192,59 @@ app.get('/admin', requireWinga, async (req, res) => {
   } catch (err) {
     console.error('Admin page error:', err);
     res.status(500).send('Hitilafu kwenye Server.');
+  }
+});
+
+// Admin Order Invoice / PDF Receipt Route
+app.get('/admin/order/invoice', requireWinga, async (req, res) => {
+  try {
+    const orderId = parseInt(req.query.id);
+    const order = await db('orders').where({ orderId, wingaId: req.session.wingaId }).first();
+    if (!order) return res.send('❌ Oda haipatikani au sio ya duka lako.');
+    
+    const winga = await db('wingas').where({ id: req.session.wingaId }).first();
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="sw">
+    <head>
+      <meta charset="UTF-8">
+      <title>Risiti ya Oda #${order.orderId}</title>
+      <style>
+        body { font-family: monospace; background: #fff; color: #000; padding: 30px; max-width: 420px; margin: 0 auto; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 30px; border-radius: 8px; }
+        .center { text-align: center; }
+        hr { border: dashed 1px #888; }
+        .btn-print { background: #007bff; color: white; border: none; padding: 12px 20px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 20px; border-radius: 6px; font-size: 15px; }
+        @media print { 
+          body { border: none; box-shadow: none; padding: 0; margin: 0; max-width: 100%; }
+          .btn-print { display: none; } 
+        }
+      </style>
+    </head>
+    <body>
+      <div class="center">
+        <h2>🛍️ ${escapeHtml(winga.name)}</h2>
+        <p>Simu: ${escapeHtml(winga.phone)}</p>
+        <hr>
+        <h3>RISITI YA MAUZO (INVOICE)</h3>
+      </div>
+      <p><strong>Namba ya Oda:</strong> #${order.orderId}</p>
+      <p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p>
+      <p><strong>Mteja Simu:</strong> ${escapeHtml(order.customerPhone)}</p>
+      <p><strong>Eneo la Mteja:</strong> ${escapeHtml(order.location)}</p>
+      <hr>
+      <p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
+      <p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || order.price || 0).toLocaleString()}</p>
+      <hr>
+      <p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p class="center" style="margin-top: 20px; font-size: 13px;"><em>Asante kwa kununua nasi! Karibu tena.</em></p>
+      <button class="btn-print" onclick="window.print()">🖨️ Chapisha / Hifadhi kama PDF</button>
+    </body>
+    </html>
+    `);
+  } catch (err) {
+    console.error('Invoice generation error:', err);
+    res.status(500).send('Hitilafu kwenye mfumo wa risiti.');
   }
 });
 
