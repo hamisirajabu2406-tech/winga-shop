@@ -837,6 +837,29 @@ app.get('/admin', requireWinga, async (req, res) => {
     const currentWingaId = req.session.wingaId;
     const currentWingaName = req.session.wingaName;
     const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
+    // Hesabu siku zilizobaki za kifurushi (Subscription Countdown)
+let subscriptionBanner = '';
+if (currentWinga && currentWinga.expiryDate) {
+  const expiryDate = new Date(currentWinga.expiryDate);
+  const today = new Date();
+  const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+  const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  if (daysLeft <= 5) {
+    // Rangi nyekundu/njano ya tahadhari zikibaki siku 5 au chini
+    subscriptionBanner = `
+    <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <span>⚠️ <strong>Tahadhari ya Kifurushi:</strong> Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Lipia mapema kuepuka kusitishwa!</span>
+      <a href="https://wa.me/${botPhone}?text=Habari%20Admin,%20naomba%20kulipia%20kifurushi%20cha%20duka%20langu%20(${encodeURIComponent(currentWingaName)})" target="_blank" style="background: #856404; color: white; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Sasa</a>
+    </div>`;
+  } else {
+    // Rangi ya kijani ya kawaida siku zikiwa nyingi
+    subscriptionBanner = `
+    <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
+      ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>).
+    </div>`;
+  }
+}
     const products = await db('products').where({ wingaId: currentWingaId });
     const orders = await db('orders').where({ wingaId: currentWingaId });
     const reviews = await db('reviews').select('*');
@@ -982,7 +1005,8 @@ app.get('/admin', requireWinga, async (req, res) => {
     </head>
     <body>
       <div class="container">
-        ${alertMessage}
+  ${alertMessage}
+  ${subscriptionBanner}
         <div class="top-nav">
           <h1>🛍️ Winga Dashboard - ${escapeHtml(currentWingaName)}</h1>
           <div>
