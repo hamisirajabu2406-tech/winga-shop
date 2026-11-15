@@ -179,7 +179,7 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      // 2. Order Command (!agiza / !order) - Inasoma Simu, Eneo, Saizi, Rangi, Idadi & Maelezo
+      // 2. Order Command (!agiza / !order)
       if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
         let productID = null;
         let location = 'Haikutajwa';
@@ -363,7 +363,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Public Catalog Route (Na Fomu Iliyoboreshwa ya Kuagiza WhatsApp)
+// Public Catalog Route (Fully Mobile Responsive)
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -388,6 +388,7 @@ app.get('/catalog', async (req, res) => {
 
     let categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
     let shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId == w.id ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
+    
     let productCards = products.map(p => {
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
       const priceFormatted = sellingPrice > 0 ? sellingPrice.toLocaleString() : 'Haikutajwa';
@@ -409,23 +410,23 @@ app.get('/catalog', async (req, res) => {
       }
       const imageHtml = (mainImage && mainImage.trim() !== '')
         ? `<div style="position: relative; cursor: pointer;" onclick="openImgModal(document.getElementById('img-${p.id}').getAttribute('data-fullsrc') || '${mainImage}')">
-            <img id="img-${p.id}" data-fullsrc="${mainImage}" src="${mainImage}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
+            <img id="img-${p.id}" data-fullsrc="${mainImage}" src="${mainImage}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
             <span style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.65); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">🔍 Gusa Kukuza</span>
            </div>${galleryThumbnailsHtml}`
         : `<div style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd;">📦</div>`;
 
       return `
-      <div class="product-card" data-name="${escapeHtml(p.name.toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
+      <div class="product-card" data-name="${escapeHtml(p.name.toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
         <div>
           ${imageHtml}
           <div style="margin-bottom: 5px;">
-            <span style="background: #e3f2fd; color: #0d47a1; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase;">${escapeHtml(categoryStr)}</span>
-            <span style="background: #f1f3f5; color: #495057; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; margin-left: 4px;">Size: ${escapeHtml(availableSizes)}</span>
+            <span style="background: #e3f2fd; color: #0d47a1; font-size: 10px; padding: 3px 7px; border-radius: 12px; font-weight: bold; text-transform: uppercase;">${escapeHtml(categoryStr)}</span>
+            <span style="background: #f1f3f5; color: #495057; font-size: 10px; padding: 3px 7px; border-radius: 12px; font-weight: bold; margin-left: 4px;">Size: ${escapeHtml(availableSizes)}</span>
           </div>
-          <h3 style="margin: 5px 0; color: #222; font-size: 16px;">${escapeHtml(p.name)}</h3>
-          <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 16px; font-weight: bold; margin: 5px 0 15px 0;">${priceDisplay}</p>
+          <h3 style="margin: 5px 0; color: #222; font-size: 15px; word-break: break-word;">${escapeHtml(p.name)}</h3>
+          <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 15px; font-weight: bold; margin: 5px 0 10px 0;">${priceDisplay}</p>
         </div>
-        <div style="font-size: 13px; color: #555; margin-bottom: 8px;">
+        <div style="font-size: 12px; color: #555; margin-bottom: 8px;">
           <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
           <span>📍 <em>${escapeHtml(sellerLocation)}</em></span>
         </div>
@@ -435,7 +436,7 @@ app.get('/catalog', async (req, res) => {
           data-price="${priceFormatted}"
           data-sizes="${escapeHtml(availableSizes)}"
           onclick="handleOrderClick(this)"
-          style="background: #25D366; color: white; padding: 10px 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%;">
+          style="background: #25D366; color: white; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%;">
           🛒 Agiza Sasa
         </button>
       </div>`;
@@ -451,28 +452,36 @@ app.get('/catalog', async (req, res) => {
     <head>
       <meta charset="UTF-8">
       <title>${escapeHtml(shopName)}</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 12px; color: #333; }
         .container { max-width: 900px; margin: 0 auto; }
-        .header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
-        .nav-btns { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .track-btn { background: #007bff; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px; }
-        .contact-btn { background: #25D366; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 5px; }
-        .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-        .filter-bar input, .filter-bar select { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-        .filter-bar input { flex: 2; min-width: 180px; }
-        .filter-bar select { flex: 1; min-width: 140px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
-        h1 { color: #111; font-size: 24px; margin: 0; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); justify-content: center; align-items: center; z-index: 1000; padding: 15px; box-sizing: border-box; }
-        .modal-content { background: white; padding: 22px; border-radius: 12px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+        .nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; sm-width: auto; }
+        .track-btn { background: #007bff; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; flex: 1; text-align: center; }
+        .contact-btn { background: #25D366; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; text-align: center; }
+        .filter-bar { display: flex; gap: 8px; margin-bottom: 15px; flex-direction: column; }
+        @media(min-width: 600px) {
+          .filter-bar { flex-direction: row; }
+          .nav-btns { width: auto; flex: unset; }
+          .track-btn, .contact-btn { flex: unset; }
+        }
+        .filter-bar input, .filter-bar select { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; width: 100%; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        @media(min-width: 500px) {
+          .grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 15px; }
+          body { padding: 20px; }
+        }
+        h1 { color: #111; font-size: 20px; margin: 0; word-break: break-word; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 1000; padding: 10px; box-sizing: border-box; }
+        .modal-content { background: white; padding: 20px; border-radius: 12px; width: 100%; max-width: 380px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
         .close-btn { position: absolute; top: 12px; right: 15px; font-size: 24px; cursor: pointer; color: #aaa; border: none; background: none; }
         .form-group { margin-bottom: 12px; text-align: left; }
         .form-group label { display: block; font-weight: bold; margin-bottom: 4px; color: #333; font-size: 12px; }
-        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 9px 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
-        .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .submit-btn { background: #25D366; color: white; border: none; padding: 12px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 8px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
+        .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .submit-btn { background: #25D366; color: white; border: none; padding: 12px; width: 100%; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 8px; }
       </style>
     </head>
     <body>
@@ -481,7 +490,7 @@ app.get('/catalog', async (req, res) => {
           <h1>${escapeHtml(shopName)}</h1>
           <div class="nav-btns">
             <a href="https://wa.me/${botPhone}?text=Habari!%20Naomba%20msaada%20tafadhali" target="_blank" class="contact-btn">💬 Contact Us</a>
-            <a href="${trackBtnUrl}" class="track-btn">🔍 Fuatilia Oda Yako</a>
+            <a href="${trackBtnUrl}" class="track-btn">🔍 Fuatilia Oda</a>
           </div>
         </div>
         <div class="filter-bar">
@@ -501,7 +510,7 @@ app.get('/catalog', async (req, res) => {
       </div>
 
       <!-- Lightbox Image Modal -->
-      <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 20px; box-sizing: border-box;">
+      <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 15px; box-sizing: border-box;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
@@ -510,20 +519,20 @@ app.get('/catalog', async (req, res) => {
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="closeModal()">&times;</button>
-          <h3 style="margin-top:0; color:#111; font-size:18px;" id="modalProductName">Agiza Bidhaa</h3>
-          <p style="color:#28a745; font-weight:bold; margin-top:-5px; margin-bottom: 12px; font-size:15px;" id="modalProductPrice"></p>
+          <h3 style="margin-top:0; color:#111; font-size:17px;" id="modalProductName">Agiza Bidhaa</h3>
+          <p style="color:#28a745; font-weight:bold; margin-top:-5px; margin-bottom: 12px; font-size:14px;" id="modalProductPrice"></p>
           <input type="hidden" id="selectedProductId">
           <input type="hidden" id="selectedProductName">
           <input type="hidden" id="selectedProductPrice">
 
           <div class="form-group">
-            <label>Namba ya Simu (Namba tupu, zisizozidi 10):</label>
+            <label>Namba ya Simu (Tarakimu 10):</label>
             <input type="tel" id="orderPhone" placeholder="0712345678" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10)" required>
           </div>
 
           <div class="form-row-2">
             <div class="form-group">
-              <label>Chagua Mkoa:</label>
+              <label>Mkoa:</label>
               <select id="orderRegion" onchange="updateOrderDistricts()" required>
                 <option value="">-- Mkoa --</option>
                 <option value="Dar es Salaam">Dar es Salaam</option>
@@ -556,7 +565,7 @@ app.get('/catalog', async (req, res) => {
               </select>
             </div>
             <div class="form-group">
-              <label>Chagua Wilaya:</label>
+              <label>Wilaya:</label>
               <select id="orderDistrict" required>
                 <option value="">-- Kwanza Mkoa --</option>
               </select>
@@ -565,18 +574,18 @@ app.get('/catalog', async (req, res) => {
 
           <div class="form-group">
             <label>Kata / Mtaa Unapoishi:</label>
-            <input type="text" id="orderWard" placeholder="Mfano: Sinza, Kariakoo, Kijitonyama" required>
+            <input type="text" id="orderWard" placeholder="Mfano: Sinza, Kariakoo" required>
           </div>
 
           <div class="form-row-2">
             <div class="form-group">
-              <label>Chagua Size:</label>
+              <label>Size:</label>
               <select id="orderSize">
                 <option value="Standard">Standard</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Chagua Rangi (Color):</label>
+              <label>Rangi (Color):</label>
               <select id="orderColor">
                 <option value="Kama ilivyo pichani">Kama pichani</option>
                 <option value="Nyeusi (Black)">Nyeusi (Black)</option>
@@ -586,7 +595,6 @@ app.get('/catalog', async (req, res) => {
                 <option value="Kijani (Green)">Kijani (Green)</option>
                 <option value="Njano (Yellow)">Njano (Yellow)</option>
                 <option value="Kijivu (Grey)">Kijivu (Grey)</option>
-                <option value="Kahawia (Brown)">Kahawia (Brown)</option>
               </select>
             </div>
           </div>
@@ -598,7 +606,7 @@ app.get('/catalog', async (req, res) => {
 
           <div class="form-group">
             <label>Maelezo ya Ziada (Si lazima):</label>
-            <textarea id="orderNotes" rows="2" placeholder="Mfano: Niletee saa 10 jioni, au nipigie ukifika..."></textarea>
+            <textarea id="orderNotes" rows="2" placeholder="Mfano: Niletee jioni..."></textarea>
           </div>
 
           <button class="submit-btn" onclick="sendToWhatsApp()">📲 Tuma Oda kwa WhatsApp</button>
@@ -693,7 +701,6 @@ app.get('/catalog', async (req, res) => {
           document.getElementById('modalProductName').innerText = '🛒 ' + name;
           document.getElementById('modalProductPrice').innerText = 'Bei: TSh ' + price;
 
-          // Weka fomu iwe tupu kila inapofunguliwa
           document.getElementById('orderPhone').value = '';
           document.getElementById('orderRegion').value = '';
           document.getElementById('orderDistrict').innerHTML = '<option value="">-- Kwanza Mkoa --</option>';
@@ -701,7 +708,6 @@ app.get('/catalog', async (req, res) => {
           document.getElementById('orderQty').value = '1';
           document.getElementById('orderNotes').value = '';
 
-          // Jaza sizes zilizopo kwenye bidhaa
           const sizeSelect = document.getElementById('orderSize');
           sizeSelect.innerHTML = '';
           const parsedSizes = sizesStr.split(',').map(s => s.trim()).filter(Boolean);
@@ -775,7 +781,7 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Order Tracking Routes
+// Order Tracking Routes (Mobile Responsive)
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -825,16 +831,16 @@ app.get('/track', async (req, res) => {
           }
         }
         resultHtml = `
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px;">
-          <h3 style="margin:0 0 10px 0; color:#111;">Oda #${order.orderId}</h3>
-          <p style="margin:5px 0;"><strong>📦 Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
-          <p style="margin:5px 0;"><strong>💰 Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p>
-          <p style="margin:5px 0;"><strong>📍 Eneo:</strong> ${escapeHtml(order.location)}</p>
-          <p style="margin:10px 0; padding:8px 12px; background:#f0f0f0; border-radius:6px; display:inline-block; font-weight:bold;">Status: ${statusBadge}</p>
+        <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px; word-break:break-word;">
+          <h3 style="margin:0 0 10px 0; color:#111; font-size:17px;">Oda #${order.orderId}</h3>
+          <p style="margin:5px 0; font-size:14px;"><strong>📦 Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
+          <p style="margin:5px 0; font-size:14px;"><strong>💰 Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p>
+          <p style="margin:5px 0; font-size:14px;"><strong>📍 Eneo:</strong> ${escapeHtml(order.location)}</p>
+          <p style="margin:10px 0; padding:8px 12px; background:#f0f0f0; border-radius:6px; display:inline-block; font-weight:bold; font-size:13px;">Status: ${statusBadge}</p>
           ${reviewSection}
         </div>`;
       } else {
-        resultHtml = `<div style="background:#f8d7da; color:#721c24; padding:12px; border-radius:6px; margin-top:20px; text-align:center;">❌ Hakuna Oda yenye Namba #${searchId}.</div>`;
+        resultHtml = `<div style="background:#f8d7da; color:#721c24; padding:12px; border-radius:6px; margin-top:20px; text-align:center; font-size:14px;">❌ Hakuna Oda yenye Namba #${searchId}.</div>`;
       }
     }
     const backCatalogUrl = shopId ? `/catalog?shop=${shopId}` : '/catalog';
@@ -843,13 +849,14 @@ app.get('/track', async (req, res) => {
     <html lang="sw">
     <head>
       <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <title>Fuatilia Oda - Winga Shop</title>
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 15px; color: #333; }
         .container { max-width: 500px; margin: 0 auto; }
-        h1 { text-align: center; color: #111; font-size: 24px; }
-        .search-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        h1 { text-align: center; color: #111; font-size: 22px; }
+        .search-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         input[type="number"] { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; margin-bottom: 12px; }
         button.btn-search { width: 100%; background: #007bff; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
         .back-link { display: block; text-align: center; margin-top: 15px; color: #666; text-decoration: none; font-size: 14px; }
@@ -861,7 +868,7 @@ app.get('/track', async (req, res) => {
         <div class="search-box">
           <form action="/track" method="GET">
             ${shopId ? `<input type="hidden" name="shop" value="${shopId}">` : ''}
-            <label style="display:block; margin-bottom:6px; font-weight:600;">Weka Namba ya Oda (Order ID):</label>
+            <label style="display:block; margin-bottom:6px; font-weight:600; font-size:13px;">Weka Namba ya Oda (Order ID):</label>
             <input type="number" name="id" placeholder="mfano: 1" value="${searchId || ''}" required>
             <button type="submit" class="btn-search">Angalia Status</button>
           </form>
@@ -904,7 +911,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Unified Login Page (Winga Admin & Platform SuperAdmin)
+// Unified Login Page (Mobile Responsive)
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -915,18 +922,19 @@ app.get('/login', (req, res) => {
   <head>
     <meta charset="UTF-8">
     <title>Winga Portal Login</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .login-box { background: white; padding: 35px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: center; width: 310px; }
-      input { padding: 10px; width: 100%; margin: 8px 0 14px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
-      button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
+      * { box-sizing: border-box; }
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 15px; }
+      .login-box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: center; width: 100%; max-width: 320px; }
+      input { padding: 11px; width: 100%; margin: 8px 0 14px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 15px; }
+      button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
       a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 10px; }
     </style>
   </head>
   <body>
     <div class="login-box">
-      <h2 style="margin-top:0;">🛍️ Winga Portal Login</h2>
+      <h2 style="margin-top:0; font-size:22px;">🛍️ Winga Portal Login</h2>
       <form action="/login" method="POST">
         <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Namba ya Simu / Username:</label>
         <input type="text" name="phone" placeholder="0712345678" required>
@@ -950,14 +958,12 @@ app.post('/login', async (req, res) => {
       return res.send('❌ Tafadhali jaza taarifa za kuingia. <br><a href="/login">Jaribu Tena</a>');
     }
 
-    // 1. Angalia kama ni SuperAdmin
     const superAdminPass = process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!';
     if (identifier.toLowerCase() === 'admin' && password === superAdminPass) {
       req.session.isSuperAdmin = true;
       return res.redirect('/superadmin');
     }
 
-    // 2. Angalia kama ni Muuzaji (Winga)
     const matchedWinga = await db('wingas').where({ phone: identifier }).first();
     if (matchedWinga) {
       const isPasswordValid = await bcrypt.compare(password, matchedWinga.password);
@@ -975,7 +981,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Self-Registration Routes
+// Winga Self-Registration Routes (Mobile Responsive)
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -983,10 +989,11 @@ app.get('/register', (req, res) => {
   <head>
     <meta charset="UTF-8">
     <title>Jisajili kama Muuzaji - Winga Shop</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 340px; }
+      * { box-sizing: border-box; }
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 15px; }
+      .box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
       input, select { padding: 10px; width: 100%; margin: 6px 0 12px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
       label { display: block; text-align: left; font-size: 12px; font-weight: bold; color: #333; }
       button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
@@ -1096,7 +1103,7 @@ app.post('/register', async (req, res) => {
     });
 
     res.send(`
-    <div style="text-align:center; padding:50px; font-family:sans-serif;">
+    <div style="text-align:center; padding:30px; font-family:sans-serif;">
       <h2 style="color:#28a745;">🎉 Usajili Umefanikiwa!</h2>
       <p>Akaunti yako ya duka yenye eneo la <strong>${escapeHtml(fullLocation)}</strong> imetengenezwa kikamilifu.</p>
       <a href="/login" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px; display:inline-block; margin-top:15px;">Ingia Kwenye Dashboard Yako</a>
@@ -1117,21 +1124,41 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga
+// Admin Dashboard for Winga (Mobile Responsive, Store Link Sharing & Admin Activation View)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
+    
+    // Kama akaunti imesitishwa (suspended), onyesha ujumbe wa kuwasiliana na Admin
     if (currentWinga && currentWinga.status === 'suspended') {
+      const renewalMsg = encodeURIComponent(`Habari Admin, nimefanya malipo ya siku 30 ya duka langu (${currentWinga.name} - ${currentWinga.phone}). Naomba unifungulie akaunti yangu.`);
       return res.send(`
-      <div style="text-align:center; padding: 50px; font-family:sans-serif;">
-        <h1 style="color: #dc3545;">⚠️ Akaunti Imesitishwa</h1>
-        <p>Muda wako wa malipo umekwisha. Hauruhusiwi kuingiza bidhaa mpya au kuona oda zako.</p>
-        <p>Wasiliana na Admin (${botPhone}) kufanya malipo ili kufunguliwa.</p>
-        <a href="/admin/pay-subscription" style="display:inline-block; margin-top:10px; padding:10px 20px; background:#28a745; color:white; text-decoration:none; border-radius:5px; font-weight:bold;">💳 Lipia Siku 30 Hapa</a>
-        <br>
-        <a href="/logout" style="display:inline-block; margin-top:20px; padding:8px 16px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">Rudi Kwenye Login</a>
-      </div>
+      <!DOCTYPE html>
+      <html lang="sw">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Akaunti Imesitishwa</title>
+        <style>
+          body { font-family: sans-serif; background: #f8f9fa; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+          .box { background: white; padding: 30px 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 400px; width: 100%; }
+          h1 { color: #dc3545; font-size: 22px; margin-top: 0; }
+          p { color: #555; font-size: 14px; line-height: 1.5; }
+          .whatsapp-btn { background: #25D366; color: white; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 15px; font-size: 15px; width: 100%; box-sizing: border-box; }
+          .logout-link { display: block; margin-top: 20px; color: #007bff; text-decoration: none; font-size: 13px; }
+        </style>
+      </head>
+      <body>
+        <div class="box">
+          <h1>⚠️ Akaunti Imesitishwa</h1>
+          <p>Muda wako wa siku 30 za matumizi umekwisha. Hauruhusiwi kuingiza bidhaa mpya au kupokea oda mpya mpaka pale akaunti itakapohuishwa.</p>
+          <p>Tafadhali fanya malipo kupitia namba ya Admin na ubofye kitufe hapa chini kumtumia ujumbe wa WhatsApp ili akufungulie akaunti yako mara moja.</p>
+          <a href="https://wa.me/${botPhone}?text=${renewalMsg}" target="_blank" class="whatsapp-btn">💬 Wasiliana na Admin (WhatsApp)</a>
+          <a href="/logout" class="logout-link">Rudi Kwenye Login</a>
+        </div>
+      </body>
+      </html>
       `);
     }
 
@@ -1150,16 +1177,16 @@ app.get('/admin', requireWinga, async (req, res) => {
       const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', year: 'numeric' });
 
       if (daysLeft <= 5) {
+        const renewalMsg = encodeURIComponent(`Habari Admin, naomba niongezewe siku 30 za duka langu (${currentWinga.name}).`);
         subscriptionBanner = `
-        <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <span>⚠️ <strong>Tahadhari ya Kifurushi:</strong> Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Lipia mapema kuepuka kusitishwa!</span>
-          <a href="/admin/pay-subscription" style="background: #28a745; color: white; padding: 6px 14px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Siku 30 Sasa</a>
+        <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px;">
+          <span>⚠️ Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Wasiliana na Admin kuongeza siku!</span>
+          <a href="https://wa.me/${botPhone}?text=${renewalMsg}" target="_blank" style="background: #25D366; color: white; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-size: 12px; font-weight: bold;">💬 Ongeza Siku WhatsApp</a>
         </div>`;
       } else {
         subscriptionBanner = `
-        <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
-          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>). 
-          <a href="/admin/pay-subscription" style="margin-left: 10px; color: #007bff; font-weight: bold; text-decoration: underline;">Ongeza Siku</a>
+        <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 13px;">
+          ⏳ Muda wa akaunti: <strong>siku ${daysLeft}</strong> zilizobaki (Inaisha tarehe: <strong>${formattedExpiry}</strong>).
         </div>`;
       }
     }
@@ -1195,14 +1222,17 @@ app.get('/admin', requireWinga, async (req, res) => {
     });
     const netProfit = totalRevenue - totalCost;
 
+    const shopUrl = `${dynamicBaseUrl}/catalog?shop=${currentWingaId}`;
+    const shareWhatsAppText = encodeURIComponent(`Habari! Karibu utazame bidhaa na uagize kupitia duka langu hapa:\n${shopUrl}`);
+
     let productRows = products.map(p => {
       const images = getProductImages(p);
       let productImgHtml = '📦';
       if (images.length > 0) {
         const thumbHtml = images.map(img =>
-          `<img src="${img}" onclick="openModal('${img}')" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
+          `<img src="${img}" onclick="openModal('${img}')" title="Bonyeza kukuza" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
         ).join('');
-        productImgHtml = `<div style="display: flex; gap: 4px; flex-direction: row; align-items: center; max-width: 110px; overflow-x: auto; padding: 2px 0;">${thumbHtml}</div>`;
+        productImgHtml = `<div style="display: flex; gap: 4px; flex-direction: row; align-items: center; max-width: 100px; overflow-x: auto; padding: 2px 0;">${thumbHtml}</div>`;
       }
       const buyingPrice = Number(p.buyingPrice || 0);
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
@@ -1216,12 +1246,10 @@ app.get('/admin', requireWinga, async (req, res) => {
         <td>TSh ${sellingPrice.toLocaleString()}</td>
         <td>${escapeHtml(p.size || 'Standard')}</td>
         <td>
-          <div style="display: flex; gap: 4px;">
-            <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
-              <input type="hidden" name="id" value="${p.id}">
-              <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
-            </form>
-          </div>
+          <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
+            <input type="hidden" name="id" value="${p.id}">
+            <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
+          </form>
         </td>
       </tr>`;
     }).join('');
@@ -1238,12 +1266,12 @@ app.get('/admin', requireWinga, async (req, res) => {
         const images = getProductImages(matchedProduct);
         if (images.length > 0) {
           const thumbHtml = images.map(img =>
-            `<img src="${img}" onclick="openModal('${img}')" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
+            `<img src="${img}" onclick="openModal('${img}')" title="Bonyeza kukuza" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
           ).join('');
-          productImgHtml = `<div style="display: flex; gap: 4px; flex-direction: row; align-items: center; max-width: 110px; overflow-x: auto;">${thumbHtml}</div>`;
+          productImgHtml = `<div style="display: flex; gap: 4px; flex-direction: row; align-items: center; max-width: 100px; overflow-x: auto;">${thumbHtml}</div>`;
         }
       }
-      let reviewCell = rev ? `${'⭐'.repeat(rev.rating)}<br><small>"${escapeHtml(rev.comment)}"</small>` : '<em style="color:#999;">Hamna feedback</em>';
+      let reviewCell = rev ? `${'⭐'.repeat(rev.rating)}<br><small>"${escapeHtml(rev.comment)}"</small>` : '<em style="color:#999; font-size:12px;">Hamna feedback</em>';
       return `
       <tr>
         <td>${productImgHtml}</td>
@@ -1252,7 +1280,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
         <td>${escapeHtml(o.location)}</td>
         <td>${escapeHtml(o.customerPhone)}</td>
-        <td><span style="padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
+        <td><span style="padding: 3px 7px; border-radius: 12px; font-size: 10px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
         <td>${reviewCell}</td>
         <td>
           <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
@@ -1270,44 +1298,54 @@ app.get('/admin', requireWinga, async (req, res) => {
     let alertMessage = '';
     if (req.query.added === 'true') {
       alertMessage = `
-      <div style="background: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 12px 15px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-        <span>✅ Bidhaa mpya imefanikiwa kuongezwa na kuarifiwa kwa wateja wako!</span>
-        <span onclick="this.parentElement.style.display='none'" style="cursor:pointer; font-size: 18px;">&times;</span>
+      <div style="background: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
+        <span>✅ Bidhaa mpya imefanikiwa kuongezwa!</span>
+        <span onclick="this.parentElement.style.display='none'" style="cursor:pointer; font-size: 16px;">&times;</span>
       </div>`;
     } else if (req.query.error === 'upload') {
       alertMessage = `
-      <div style="background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 12px 15px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-        <span>❌ Hitilafu ya kupakia picha kwenda Cloudinary. Jaribu tena.</span>
-        <span onclick="this.parentElement.style.display='none'" style="cursor:pointer; font-size: 18px;">&times;</span>
+      <div style="background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
+        <span>❌ Hitilafu ya kupakia picha. Jaribu tena.</span>
+        <span onclick="this.parentElement.style.display='none'" style="cursor:pointer; font-size: 16px;">&times;</span>
       </div>`;
     }
 
     res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="sw">
     <head>
       <title>Winga Dashboard - ${escapeHtml(currentWingaName)}</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f4f6f8; color: #333; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; color: #333; }
         .container { max-width: 1100px; margin: 0 auto; }
         .top-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 24px; }
-        .stat-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .stat-card h3 { margin: 0; font-size: 13px; color: #666; text-transform: uppercase; }
-        .stat-card p { margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #111; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 24px; }
-        h1, h2 { color: #111; margin-top: 0; }
-        .form-group { margin-bottom: 15px; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: 600; }
-        input[type="text"], input[type="number"], input[type="file"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button.btn-add { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-        th { background: #f8f9fa; }
-        .contact-support { background: #25D366; color: white; border: none; padding: 8px 14px; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stat-card h3 { margin: 0; font-size: 11px; color: #666; text-transform: uppercase; }
+        .stat-card p { margin: 6px 0 0 0; font-size: 20px; font-weight: bold; color: #111; word-break: break-word; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1, h2 { color: #111; margin-top: 0; font-size: 18px; }
+        @media(min-width: 600px) {
+          body { padding: 20px; }
+          h1, h2 { font-size: 22px; }
+          .card { padding: 20px; }
+        }
+        .form-group { margin-bottom: 12px; }
+        .form-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        @media(min-width: 600px) {
+          .form-row { grid-template-columns: 1fr 1fr; gap: 15px; }
+        }
+        label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 12px; }
+        input[type="text"], input[type="number"], input[type="file"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        button.btn-add { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; }
+        .table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 600px; font-size: 13px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; white-space: nowrap; }
+        th { background: #f8f9fa; font-size: 12px; }
+        .contact-support { background: #25D366; color: white; border: none; padding: 8px 12px; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
       </style>
     </head>
     <body>
@@ -1318,16 +1356,38 @@ app.get('/admin', requireWinga, async (req, res) => {
           <h1>🛍️ Winga Dashboard - ${escapeHtml(currentWingaName)}</h1>
           <div>
             <a href="https://wa.me/${botPhone}?text=Habari%20Admin" target="_blank" class="contact-support">💬 Msaada</a>
-            <a href="/logout" style="margin-left: 10px; color:#dc3545; font-weight:bold; text-decoration:none;">Logout</a>
+            <a href="/logout" style="margin-left: 8px; color:#dc3545; font-weight:bold; text-decoration:none; font-size:13px;">Logout</a>
           </div>
         </div>
+
+        <!-- Store Link & Sharing Card -->
+        <div class="card" style="background: #e3f2fd; border: 1px solid #90caf9;">
+          <h3 style="margin-top: 0; color: #0d47a1; font-size: 16px;">🔗 Link Yako ya Duka (Store Link)</h3>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+            <input type="text" id="storeLinkInput" value="${shopUrl}" readonly style="flex: 1; min-width: 200px; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white; font-size: 13px;">
+            <button type="button" onclick="copyStoreLink()" style="background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px;">📋 Nakili Link</button>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="https://wa.me/?text=${shareWhatsAppText}" target="_blank" style="background: #25D366; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;">📲 Share to WhatsApp</a>
+          </div>
+        </div>
+        <script>
+          function copyStoreLink() {
+            var copyText = document.getElementById("storeLinkInput");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(copyText.value);
+            alert("✅ Link imenakiliwa! Sasa unaweza kui-paste popote.");
+          }
+        </script>
+
         <div class="card">
-          <h3>🔑 Badilisha Nenosiri</h3>
+          <h3 style="font-size:16px;">🔑 Badilisha Nenosiri</h3>
           <form id="changePasswordForm">
             <div class="form-group"><label>Nenosiri la Zamani:</label><input type="password" id="oldPassword" required></div>
             <div class="form-group"><label>Nenosiri Jipya:</label><input type="password" id="newPassword" required></div>
             <div class="form-group"><label>Rudia Nenosiri Jipya:</label><input type="password" id="confirmPassword" required></div>
-            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer;">Hifadhi Nenosiri</button>
+            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">Hifadhi Nenosiri</button>
           </form>
         </div>
         <script>
@@ -1350,19 +1410,16 @@ app.get('/admin', requireWinga, async (req, res) => {
             }
           });
         </script>
-        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border: 1px solid #90caf9; margin-bottom: 20px;">
-          <h3 style="margin-top: 0; color: #0d47a1;">🔗 Link Yako ya Duka</h3>
-          <input type="text" value="${dynamicBaseUrl}/catalog?shop=${currentWingaId}" readonly style="width: 100%; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white;">
-        </div>
+
         <div class="stats-grid">
           <div class="stat-card"><h3>Completed Orders</h3><p>${completedOrdersCount}</p></div>
           <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
-          <div class="stat-card"><h3>Net Profit Earned</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
+          <div class="stat-card"><h3>Net Profit</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
 
         <div class="card">
-          <h2>📊 Takwimu za Mauzo ya Hivi Karibuni (Analytics)</h2>
-          <div style="position: relative; height: 250px; width: 100%;">
+          <h2>📊 Takwimu za Mauzo (Analytics)</h2>
+          <div style="position: relative; height: 220px; width: 100%;">
             <canvas id="salesAnalyticsChart"></canvas>
           </div>
         </div>
@@ -1397,22 +1454,22 @@ app.get('/admin', requireWinga, async (req, res) => {
         </script>
 
         <div class="card">
-          <h2>Add New Product (1 to 4 Photos)</h2>
+          <h2>Weka Bidhaa Mpya (Max Picha 4)</h2>
           <form action="/admin/add" method="POST" enctype="multipart/form-data">
             <div class="form-row">
-              <div class="form-group"><label>Product Name</label><input type="text" name="name" required></div>
-              <div class="form-group"><label>Category</label><input type="text" name="category" required></div>
+              <div class="form-group"><label>Jina la Bidhaa</label><input type="text" name="name" required></div>
+              <div class="form-group"><label>Aina (Category)</label><input type="text" name="category" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Buying Price (TSh)</label><input type="number" name="buyingPrice" required></div>
-              <div class="form-group"><label>Selling Price (TSh)</label><input type="number" name="sellingPrice" required></div>
+              <div class="form-group"><label>Bei ya Kununua (Buying Price)</label><input type="number" name="buyingPrice" required></div>
+              <div class="form-group"><label>Bei ya Kuuzia (Selling Price)</label><input type="number" name="sellingPrice" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Available Sizes (Tenganisha kwa koma, mf: S, M, L, XL)</label><input type="text" name="size" value="Standard"></div>
+              <div class="form-group"><label>Available Sizes (Mf: S, M, L, XL au Standard)</label><input type="text" name="size" value="Standard"></div>
               <div class="form-group">
-                <label>Product Photos (Max 4)</label>
+                <label>Picha za Bidhaa (Max 4)</label>
                 <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
-                <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px;"></small>
+                <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px; font-size: 11px;"></small>
               </div>
             </div>
             <button type="submit" class="btn-add">Upload & Add to Catalog</button>
@@ -1432,22 +1489,28 @@ app.get('/admin', requireWinga, async (req, res) => {
             }
           }
         </script>
+
         <div class="card">
           <h2>Customer Orders & Reviews (${orders.length})</h2>
-          <table>
-            <thead><tr><th>Photo</th><th>Order #</th><th>Product</th><th>Price</th><th>Location</th><th>Phone</th><th>Status</th><th>Feedback</th><th>Action</th></tr></thead>
-            <tbody>${orderRows || '<tr><td colspan="9">No orders placed yet.</td></tr>'}</tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>Photo</th><th>Order #</th><th>Product</th><th>Price</th><th>Location</th><th>Phone</th><th>Status</th><th>Feedback</th><th>Action</th></tr></thead>
+              <tbody>${orderRows || '<tr><td colspan="9">No orders placed yet.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
+
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
             <h2 style="margin:0;">Product Catalog (${products.length})</h2>
-            <input type="text" id="sellerSearchInput" onkeyup="filterSellerProducts()" placeholder="🔍 Tafuta bidhaa zako..." style="max-width:300px; padding:8px 12px; border:1px solid #ccc; border-radius:6px; font-size:14px;">
+            <input type="text" id="sellerSearchInput" onkeyup="filterSellerProducts()" placeholder="🔍 Tafuta bidhaa zako..." style="max-width:250px; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:13px;">
           </div>
-          <table>
-            <thead><tr><th>ID</th><th>Photos</th><th>Name</th><th>Category</th><th>Buying Price</th><th>Selling Price</th><th>Size</th><th>Action</th></tr></thead>
-            <tbody id="sellerProductTable">${productRows || '<tr><td colspan="8">No products added yet.</td></tr>'}</tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>ID</th><th>Photos</th><th>Name</th><th>Category</th><th>Buying Price</th><th>Selling Price</th><th>Size</th><th>Action</th></tr></thead>
+              <tbody id="sellerProductTable">${productRows || '<tr><td colspan="8">No products added yet.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
         <script>
           function filterSellerProducts() {
@@ -1461,6 +1524,7 @@ app.get('/admin', requireWinga, async (req, res) => {
           }
         </script>
       </div>
+
       <div id="imgModal" onclick="closeModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); justify-content: center; align-items: center; cursor: pointer;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="modalImage" style="max-width: 85%; max-height: 85%; border-radius: 8px; object-fit: contain;">
@@ -1494,13 +1558,14 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
     <html lang="sw">
     <head>
       <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <title>Risiti ya Oda #${order.orderId}</title>
       <style>
-        body { font-family: monospace; background: #fff; color: #000; padding: 30px; max-width: 420px; margin: 0 auto; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 30px; border-radius: 8px; }
+        body { font-family: monospace; background: #fff; color: #000; padding: 20px; max-width: 420px; margin: 20px auto; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-radius: 8px; box-sizing: border-box; }
         .center { text-align: center; }
         hr { border: dashed 1px #888; }
         a { color: #007bff; text-decoration: none; }
-        .btn-print { background: #007bff; color: white; border: none; padding: 12px 20px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 20px; border-radius: 6px; font-size: 15px; }
+        .btn-print { background: #007bff; color: white; border: none; padding: 12px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 20px; border-radius: 6px; font-size: 15px; }
         @media print { 
           body { border: none; box-shadow: none; padding: 0; margin: 0; max-width: 100%; }
           .btn-print { display: none; } 
@@ -1532,117 +1597,6 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   } catch (err) {
     console.error('Invoice generation error:', err);
     res.status(500).send('Hitilafu kwenye mfumo wa risiti.');
-  }
-});
-
-// Subscription Payment Routes
-app.get('/admin/pay-subscription', requireWinga, async (req, res) => {
-  try {
-    const winga = await db('wingas').where({ id: req.session.wingaId }).first();
-    if (!winga) return res.redirect('/login');
-
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="sw">
-    <head>
-      <meta charset="UTF-8">
-      <title>Lipia Kifurushi - Winga Shop</title>
-      <style>
-        body { font-family: sans-serif; background: #f4f6f8; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 360px; }
-        input, select { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
-        .back { display: block; margin-top: 15px; color: #007bff; text-decoration: none; font-size: 14px; }
-        .info-box { background: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: left; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
-        <h2>💳 Lipia Siku 30 (TSh 5,000)</h2>
-        <div class="info-box">
-          <strong>Maelezo ya Lipa Namba:</strong><br>
-          Unaweza kulipa kupitia <em>Mix by Yas, M-Pesa, au Tigo Pesa</em> kwenda Namba ya Biashara / Lipa Namba yetu au kuweka namba yako hapa chini kufanya malipo ya moja kwa moja.
-        </div>
-        <form action="/admin/process-payment" method="POST">
-          <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Chagua Mtandao:</label>
-          <select name="network" required>
-            <option value="MixByYas">Mix by Yas</option>
-            <option value="M-Pesa">Vodacom M-Pesa</option>
-            <option value="TigoPesa">Tigo Pesa</option>
-            <option value="AirtelMoney">Airtel Money</option>
-          </select>
-          <label style="display:block; text-align:left; font-size:12px; font-weight:bold; margin-top:8px;">Namba ya Simu ya Malipo:</label>
-          <input type="text" name="phone" value="${escapeHtml(winga.phone)}" placeholder="07xxxxxxxx" required>
-          <button type="submit">Thibitisha na Lipa Sasa</button>
-        </form>
-        <a href="/admin" class="back">← Rudi Kwenye Dashboard</a>
-      </div>
-    </body>
-    </html>
-    `);
-  } catch (err) {
-    console.error('Payment page error:', err);
-    res.status(500).send('Hitilafu kwenye mfumo wa malipo.');
-  }
-});
-
-app.post('/admin/process-payment', requireWinga, async (req, res) => {
-  try {
-    const wingaId = req.session.wingaId;
-    const winga = await db('wingas').where({ id: wingaId }).first();
-    if (!winga) return res.redirect('/login');
-
-    const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
-    baseDate.setDate(baseDate.getDate() + 30);
-
-    await db('wingas').where({ id: wingaId }).update({
-      expiryDate: baseDate,
-      status: 'active'
-    });
-
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="sw">
-    <head>
-      <meta charset="UTF-8">
-      <title>Malipo Yamethibitishwa</title>
-      <style>
-        body { font-family: sans-serif; background: #e8f5e9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 350px; }
-        a { background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px; }
-      </style>
-    </head>
-    <body>
-      <div class="box">
-        <h2 style="color: #2e7d32;">🎉 Malipo Yamefanikiwa!</h2>
-        <p>Akaunti yako imeongezewa siku 30 mpaka tarehe <strong>${baseDate.toLocaleDateString('sw-TZ')}</strong>.</p>
-        <a href="/admin">Rudi Kwenye Dashboard</a>
-      </div>
-    </body>
-    </html>
-    `);
-  } catch (err) {
-    console.error('Process payment error:', err);
-    res.status(500).send('Hitilafu wakati wa kuchakata malipo.');
-  }
-});
-
-app.post('/api/payment/webhook', async (req, res) => {
-  try {
-    const { phone, status } = req.body;
-    if (status === 'SUCCESS' || status === 'completed') {
-      const winga = await db('wingas').where({ phone }).first();
-      if (winga) {
-        const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
-        baseDate.setDate(baseDate.getDate() + 30);
-        await db('wingas').where({ id: winga.id }).update({ expiryDate: baseDate, status: 'active' });
-        return res.status(200).json({ success: true, message: 'Subscription extended successfully.' });
-      }
-    }
-    return res.status(400).json({ success: false, message: 'Invalid payment status or phone.' });
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1707,24 +1661,6 @@ app.post('/admin/product/delete', requireWinga, async (req, res) => {
     await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).del();
   } catch (err) {
     console.error('❌ Error deleting product:', err);
-  }
-  res.redirect('/admin');
-});
-
-// Edit Product
-app.post('/admin/product/edit', requireWinga, async (req, res) => {
-  try {
-    const { id, name, category, buyingPrice, sellingPrice, size } = req.body;
-    await db('products').where({ id: parseInt(id), wingaId: req.session.wingaId }).update({
-      name: name ? name.trim() : undefined,
-      category: category ? category.trim() : undefined,
-      buyingPrice: Number(buyingPrice),
-      sellingPrice: Number(sellingPrice),
-      price: Number(sellingPrice),
-      size: size ? size.trim() : undefined
-    });
-  } catch (err) {
-    console.error('❌ Error updating product:', err);
   }
   res.redirect('/admin');
 });
@@ -1797,17 +1733,19 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password Routes (WhatsApp OTP)
+// Forgot & Reset Password Routes (WhatsApp OTP) (Mobile Responsive)
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
   <html>
   <head>
     <title>Umesahau Nenosiri</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 320px; }
-      input { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
+      * { box-sizing: border-box; }
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 15px; }
+      .box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 100%; max-width: 320px; }
+      input { padding: 11px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 15px; }
       button { background: #007bff; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; }
       a { color: #007bff; text-decoration: none; font-size: 14px; display: block; margin-top: 15px; }
     </style>
@@ -1850,23 +1788,26 @@ app.post('/forgot-password', async (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html>
-    <head><title>Reset</title></head>
-    <body style="font-family:sans-serif; background:rgb(106, 136, 232); display:flex; justify-content:center; align-items:center; height:100vh; margin:0;">
-      <div style="background:white; padding:30px; border-radius:8px; text-align:center; width:320px;">
+    <head>
+      <title>Reset</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    </head>
+    <body style="font-family:sans-serif; background:rgb(106, 136, 232); display:flex; justify-content:center; align-items:center; height:100vh; margin:0; padding:15px; box-sizing:border-box;">
+      <div style="background:white; padding:25px; border-radius:8px; text-align:center; width:100%; max-width:320px;">
         <h2>🔐 Weka Nenosiri Jipya</h2>
         <form action="/reset-password" method="POST">
           <input type="hidden" name="phone" value="${escapeHtml(winga.phone)}">
-          <input type="text" name="otp" placeholder="Kodi ya OTP" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
-          <input type="password" name="newPassword" placeholder="Nenosiri Jipya" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
-          <input type="password" name="confirmPassword" placeholder="Rudia Nenosiri Jipya" required style="width:100%; padding:10px; margin:8px 0; box-sizing:border-box;">
-          <button type="submit" style="background:#28a745; color:white; border:none; padding:10px; width:100%; font-weight:bold; cursor:pointer; border-radius:4px;">Hifadhi</button>
+          <input type="text" name="otp" placeholder="Kodi ya OTP" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
+          <input type="password" name="newPassword" placeholder="Nenosiri Jipya" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
+          <input type="password" name="confirmPassword" placeholder="Rudia Nenosiri Jipya" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
+          <button type="submit" style="background:#28a745; color:white; border:none; padding:12px; width:100%; font-weight:bold; cursor:pointer; border-radius:4px; font-size:16px;">Hifadhi</button>
         </form>
       </div>
     </body>
     </html>
     `);
   } catch (err) {
-    res.status(500).send(`❌ Hitilafu: ${err.message}`);
+    res.status(500).send(`❌ Hitilafu: ${escapeHtml(err.message)}`);
   }
 });
 
@@ -1889,7 +1830,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Routes (Protected by Session Login)
+// Super Admin Routes (Mobile Responsive)
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -1898,6 +1839,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     const reviews = await db('reviews').select('*');
     let platformTotalProfit = 0;
     let platformTotalRevenue = 0;
+
     let wingaRows = wingas.map(w => {
       const wProducts = products.filter(p => p.wingaId === w.id);
       const wOrders = orders.filter(o => o.wingaId === w.id);
@@ -1917,8 +1859,8 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
       platformTotalProfit += wingaProfit;
       platformTotalRevenue += wingaRevenue;
       const statusBadge = w.status === 'active'
-        ? `<span style="background:#28a745; color:white; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;">Active</span>`
-        : `<span style="background:#dc3545; color:white; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;">Suspended</span>`;
+        ? `<span style="background:#28a745; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Active</span>`
+        : `<span style="background:#dc3545; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Suspended</span>`;
       const expiryFormatted = w.expiryDate ? new Date(w.expiryDate).toLocaleDateString() : 'N/A';
       return `
       <tr>
@@ -1931,7 +1873,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
         <td>${completedOrders} orders</td>
         <td style="color:#28a745; font-weight:bold;">TSh ${wingaProfit.toLocaleString()}</td>
         <td>
-          <div style="display:flex; gap:4px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
             ${w.status === 'suspended' ? `
             <form action="/superadmin/winga/status" method="POST" style="display:inline;">
               <input type="hidden" name="wingaId" value="${w.id}">
@@ -1956,7 +1898,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
       const matchedWinga = wingas.find(w => w.id === p.wingaId);
       const sellerName = matchedWinga ? matchedWinga.name : `Winga #${p.wingaId}`;
       const images = getProductImages(p);
-      const mainImg = images[0] ? `<img src="${images[0]}" style="width: 38px; height: 38px; object-fit: cover; border-radius: 4px;">` : '📦';
+      const mainImg = images[0] ? `<img src="${images[0]}" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px;">` : '📦';
       return `
       <tr class="super-prod-row">
         <td><strong>#${p.id}</strong></td>
@@ -1990,27 +1932,35 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
 
     res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="sw">
     <head>
       <title>Super Admin - Platform Manager</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <style>
-        body { font-family: sans-serif; background: #eef2f5; margin: 0; padding: 20px; color: #333; }
+        * { box-sizing: border-box; }
+        body { font-family: sans-serif; background: #eef2f5; margin: 0; padding: 12px; color: #333; }
         .container { max-width: 1200px; margin: 0 auto; }
-        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: #1a1a1a; color: white; padding: 20px; border-radius: 8px; }
-        .stat-card h3 { margin: 0 0 10px 0; font-size: 14px; color: #aaa; text-transform: uppercase; }
-        .stat-card p { margin: 0; font-size: 24px; font-weight: bold; color: #4ade80; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-        th { background: #f8f9fa; }
-        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat-card { background: #1a1a1a; color: white; padding: 15px; border-radius: 8px; }
+        .stat-card h3 { margin: 0 0 6px 0; font-size: 12px; color: #aaa; text-transform: uppercase; }
+        .stat-card p { margin: 0; font-size: 20px; font-weight: bold; color: #4ade80; word-break: break-word; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        @media(min-width: 600px) {
+          body { padding: 20px; }
+          .card { padding: 20px; }
+        }
+        .table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 600px; font-size: 13px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; white-space: nowrap; }
+        th { background: #f8f9fa; font-size: 12px; }
+        h1, h2 { font-size: 18px; }
+        @media(min-width: 600px) { h1, h2 { font-size: 22px; } }
       </style>
     </head>
     <body>
       <div class="container">
         <h1>👑 Platform Super Admin</h1>
-        <a href="/logout" style="background: #ec0c22; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px; display: inline-block; margin-bottom: 15px;">🚪 Logout</a>
+        <a href="/logout" style="background: #ec0c22; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; margin-bottom: 15px;">🚪 Logout</a>
         <div class="stats-grid">
           <div class="stat-card"><h3>Total Wingas</h3><p style="color:white;">${wingas.length}</p></div>
           <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${platformTotalRevenue.toLocaleString()}</p></div>
@@ -2018,24 +1968,30 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
         </div>
         <div class="card">
           <h2>🏢 Wingas Directory</h2>
-          <table>
-            <thead><tr><th>ID</th><th>Name & Location</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
-            <tbody>${wingaRows || '<tr><td colspan="9">No wingas registered.</td></tr>'}</tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>ID</th><th>Name & Location</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
+              <tbody>${wingaRows || '<tr><td colspan="9">No wingas registered.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
         <div class="card">
           <h2>💬 Customer Reviews (${reviews.length})</h2>
-          <table>
-            <thead><tr><th>Order #</th><th>Shop</th><th>Product</th><th>Rating</th><th>Comment</th></tr></thead>
-            <tbody>${superadminFeedbackRows || '<tr><td colspan="5">No reviews.</td></tr>'}</tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>Order #</th><th>Shop</th><th>Product</th><th>Rating</th><th>Comment</th></tr></thead>
+              <tbody>${superadminFeedbackRows || '<tr><td colspan="5">No reviews.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
         <div class="card">
           <h2>📦 Product Moderation (${products.length})</h2>
-          <table>
-            <thead><tr><th>ID</th><th>Photo</th><th>Name</th><th>Seller</th><th>Price</th><th>Action</th></tr></thead>
-            <tbody>${superadminProductRows || '<tr><td colspan="6">No products.</td></tr>'}</tbody>
-          </table>
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>ID</th><th>Photo</th><th>Name</th><th>Seller</th><th>Price</th><th>Action</th></tr></thead>
+              <tbody>${superadminProductRows || '<tr><td colspan="6">No products.</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     </body>
@@ -2086,9 +2042,9 @@ cron.schedule('0 8 * * *', async () => {
       const chatId = formattedPhone + '@s.whatsapp.net';
       if (daysLeft <= 0 && w.status === 'active') {
         await db('wingas').where({ id: w.id }).update({ status: 'suspended' });
-        try { await sock.sendMessage(chatId, { text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa malipo umekwisha.` }); } catch (e) {}
+        try { await sock.sendMessage(chatId, { text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa siku 30 za matumizi umekwisha. Wasiliana na Admin WhatsApp kufanya malipo ili kufunguliwa tena.` }); } catch (e) {}
       } else if (daysLeft === 3 && w.status === 'active') {
-        try { await sock.sendMessage(chatId, { text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako itasitishwa ndani ya siku 3.` }); } catch (e) {}
+        try { await sock.sendMessage(chatId, { text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako ya Winga Shop itasitishwa ndani ya siku 3. Wasiliana na Admin kuongeza siku.` }); } catch (e) {}
       }
     }
   } catch (err) { console.error('Cron error:', err); }
