@@ -8,13 +8,12 @@ const path = require('path');
 const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
-const basicAuth = require('express-basic-auth');
 const cloudinary = require('cloudinary').v2;
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 
 // Configure Cloudinary using Environment Variables
 cloudinary.config({
@@ -27,7 +26,7 @@ cloudinary.config({
 let sock = null;
 let isWhatsappReady = false;
 
-// Production Environment Checks (Updated to accept WingaAdminPass2026!)
+// Production Environment Checks
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'winga-super-secret-key') {
     console.error('❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!');
@@ -45,7 +44,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Unified Session Middleware with Lax cookie settings to prevent login loops
+// Unified Session Middleware
 app.use(session({
   secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
   resave: false,
@@ -58,16 +57,10 @@ app.use(session({
   }
 }));
 
-// Basic Auth Middleware for Superadmin Area
-app.use('/superadmin', basicAuth({
-  users: { 'admin': process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!' },
-  challenge: true
-}));
-
-// Multer Memory Storage Configuration (Files kept in RAM temporarily before uploading to Cloudinary)
+// Multer Memory Storage Configuration
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB Limit per file
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|webp|gif/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -79,9 +72,16 @@ const upload = multer({
   }
 }).array('images', 4);
 
-// Authentication Guard Middleware
+// Authentication Guard Middlewares
 function requireWinga(req, res, next) {
   if (!req.session || !req.session.wingaId) {
+    return res.redirect('/login');
+  }
+  next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!req.session || !req.session.isSuperAdmin) {
     return res.redirect('/login');
   }
   next();
@@ -99,10 +99,7 @@ function getProductImages(product) {
   } catch (e) {
     list = [raw];
   }
-  return list.map(img => {
-    if (!img) return '';
-    return String(img).trim();
-  }).filter(Boolean);
+  return list.map(img => (img ? String(img).trim() : '')).filter(Boolean);
 }
 
 // Helper for escaping HTML attributes
@@ -119,7 +116,7 @@ function escapeHtml(str) {
 // Initialize Baileys WhatsApp Connection
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-  
+
   sock = makeWASocket({
     auth: state,
     printQRInTerminal: true,
@@ -152,7 +149,7 @@ async function connectToWhatsApp() {
     if (type !== 'notify') return;
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
-      
+
       const remoteJid = msg.key.remoteJid;
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
       const lowerText = text.toLowerCase();
@@ -182,11 +179,16 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      // 2. Order Command (!agiza / !order)
+      // 2. Order Command (!agiza / !order) - Inasoma Simu, Eneo, Saizi, Rangi, Idadi & Maelezo
       if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
         let productID = null;
         let location = 'Haikutajwa';
         let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+        let size = 'Standard';
+        let color = '';
+        let qty = 1;
+        let notes = '';
+
         if (text.includes('|')) {
           const payload = text.slice(7).split('|');
           productID = parseInt(payload[0].trim());
@@ -202,27 +204,60 @@ async function connectToWhatsApp() {
             const lower = trimmed.toLowerCase();
             if (lower.includes('simu:')) {
               const extractedPhone = trimmed.split(/simu:/i)[1].trim();
-              if (extractedPhone && extractedPhone !== 'haikutajwa') phone = extractedPhone;
+              if (extractedPhone && extractedPhone.toLowerCase() !== 'haikutajwa') phone = extractedPhone;
             }
             if (lower.includes('eneo:')) {
               const extractedLocation = trimmed.split(/eneo:/i)[1].trim();
-              if (extractedLocation && extractedLocation !== 'haikutajwa') location = extractedLocation;
+              if (extractedLocation && extractedLocation.toLowerCase() !== 'haikutajwa') location = extractedLocation;
+            }
+            if (lower.includes('saizi:') || lower.includes('size:')) {
+              const extractedSize = trimmed.split(/saizi:|size:/i)[1].trim();
+              if (extractedSize) size = extractedSize;
+            }
+            if (lower.includes('rangi:') || lower.includes('color:')) {
+              const extractedColor = trimmed.split(/rangi:|color:/i)[1].trim();
+              if (extractedColor && extractedColor.toLowerCase() !== 'haijatajwa') color = extractedColor;
+            }
+            if (lower.includes('idadi:')) {
+              const extractedQty = parseInt(trimmed.split(/idadi:/i)[1].trim());
+              if (!isNaN(extractedQty) && extractedQty > 0) qty = extractedQty;
+            }
+            if (lower.includes('maelezo:')) {
+              const extractedNotes = trimmed.split(/maelezo:/i)[1].trim();
+              if (extractedNotes && extractedNotes.toLowerCase() !== 'hakuna') notes = extractedNotes;
             }
           }
         }
+
         const product = await db('products').where({ id: productID }).first();
         if (!product) {
           await sock.sendMessage(remoteJid, { text: `❌ Bidhaa #${productID} haipo.` });
           continue;
         }
+
+        const unitBuying = Number(product.buyingPrice || 0);
+        const unitSelling = Number(product.sellingPrice || product.price || 0);
+        const totalBuying = unitBuying * qty;
+        const totalSelling = unitSelling * qty;
+
+        let detailsSummary = product.name;
+        const extras = [];
+        if (qty > 1) extras.push(`x${qty}`);
+        if (size && size !== 'Standard') extras.push(`Size: ${size}`);
+        if (color) extras.push(`Rangi: ${color}`);
+        if (notes) extras.push(`Maelezo: ${notes}`);
+        if (extras.length > 0) {
+          detailsSummary += ` (${extras.join(', ')})`;
+        }
+
         const maxResult = await db('orders').max('orderId as maxId').first();
         const nextOrderId = (maxResult && maxResult.maxId ? maxResult.maxId : 0) + 1;
         const newOrder = {
           orderId: nextOrderId,
           wingaId: product.wingaId || 1,
-          productName: product.name,
-          buyingPrice: Number(product.buyingPrice || 0),
-          sellingPrice: Number(product.sellingPrice || product.price || 0),
+          productName: detailsSummary,
+          buyingPrice: totalBuying,
+          sellingPrice: totalSelling,
           customerPhone: phone,
           location: location,
           senderJid: remoteJid,
@@ -230,12 +265,13 @@ async function connectToWhatsApp() {
           date: new Date()
         };
         await db('orders').insert(newOrder);
+
         const trackUrl = `${BASE_URL}/track?id=${newOrder.orderId}`;
         await sock.sendMessage(remoteJid, {
           text: `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
                 `🔖 *Oda:* #${newOrder.orderId}\n` +
-                `📦 *Bidhaa:* ${product.name}\n` +
-                `💰 *Bei:* TSh ${newOrder.sellingPrice.toLocaleString()}\n` +
+                `📦 *Bidhaa:* ${detailsSummary}\n` +
+                `💰 *Jumla ya Bei:* TSh ${newOrder.sellingPrice.toLocaleString()}\n` +
                 `📞 *Simu:* ${phone}\n` +
                 `📍 *Eneo:* ${location}\n` +
                 `📌 *Status:* 🟡 Pending\n\n` +
@@ -248,14 +284,14 @@ async function connectToWhatsApp() {
       // 3. Greeting Keywords
       const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
       if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
-        await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute nguo zetu hapa:\n${BASE_URL}/catalog` });
+        await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${BASE_URL}/catalog` });
         continue;
       }
     }
   });
 }
 
-// Helper: Broadcast New Product Notification (Using Cloudinary URL)
+// Helper: Broadcast New Product Notification
 async function notifyShopCustomers(winga, newProduct) {
   try {
     if (!isWhatsappReady || !sock) return;
@@ -263,7 +299,7 @@ async function notifyShopCustomers(winga, newProduct) {
     const customerJids = [...new Set(shopOrders.map(o => o.senderJid).filter(Boolean))];
     if (customerJids.length === 0) return;
     const images = getProductImages(newProduct);
-        
+
     const alertMsg =
       `📢 *TAARIFA ZA BIDHAA MPYA!* 🛍️\n` +
       `-----------------------------------\n` +
@@ -272,7 +308,7 @@ async function notifyShopCustomers(winga, newProduct) {
       `💰 *Bei:* TSh ${Number(newProduct.sellingPrice).toLocaleString()}\n` +
       `📁 *Aina:* ${newProduct.category}\n\n` +
       `🔗 *Tazama na uagize hapa:*\n${BASE_URL}/catalog?shop=${winga.id}`;
-      
+
     for (const jid of customerJids) {
       try {
         if (images.length > 0 && images[0]) {
@@ -304,13 +340,13 @@ async function notifyWinga(order, product) {
       `🔔 *ODA MPYA IMETOKA KWENYE DUKA YAKO!* 🛍️\n` +
       `-----------------------------------\n` +
       `🔖 *Namba ya Oda:* #${order.orderId}\n` +
-      `📦 *Bidhaa:* ${product.name}\n` +
+      `📦 *Bidhaa:* ${order.productName}\n` +
       `💰 *Bei ya Kuuzia:* TSh ${Number(order.sellingPrice).toLocaleString()}\n` +
       `💵 *Faida Yako (Profit):* TSh ${(order.sellingPrice - order.buyingPrice).toLocaleString()}\n` +
       `📍 *Eneo la Mteja:* ${order.location}\n` +
       `📞 *Mteja Simu:* ${order.customerPhone}\n\n` +
       `📲 Angalia dashboard yako hapa: ${BASE_URL}/admin`;
-      
+
     const images = getProductImages(product);
     if (images.length > 0 && images[0]) {
       await sock.sendMessage(wingaChatId, { image: { url: images[0] }, caption: alertMessage });
@@ -327,7 +363,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Public Catalog Route
+// Public Catalog Route (Na Fomu Iliyoboreshwa ya Kuagiza WhatsApp)
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -349,20 +385,22 @@ app.get('/catalog', async (req, res) => {
     const trackBtnUrl = shopId ? `/track?shop=${shopId}` : '/track';
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
     const categories = [...new Set(allProducts.map(p => (p.category || 'General').trim()))];
-        
+
     let categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
     let shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId == w.id ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
     let productCards = products.map(p => {
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
       const priceFormatted = sellingPrice > 0 ? sellingPrice.toLocaleString() : 'Haikutajwa';
       const priceDisplay = sellingPrice > 0 ? `TSh ${priceFormatted}` : 'Wasiliana na Muuzaji';
-            
+
       const imageList = getProductImages(p);
       const mainImage = imageList[0] || '';
       const categoryStr = (p.category || 'General').trim();
+      const availableSizes = (p.size || 'Standard').trim();
       const matchedWinga = wingas.find(w => w.id === p.wingaId);
       const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
       const sellerLocation = matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
+
       let galleryThumbnailsHtml = '';
       if (imageList.length > 1) {
         galleryThumbnailsHtml = `<div style="display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 4px;">` +
@@ -375,12 +413,14 @@ app.get('/catalog', async (req, res) => {
             <span style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.65); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">🔍 Gusa Kukuza</span>
            </div>${galleryThumbnailsHtml}`
         : `<div style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd;">📦</div>`;
+
       return `
       <div class="product-card" data-name="${escapeHtml(p.name.toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
         <div>
           ${imageHtml}
           <div style="margin-bottom: 5px;">
             <span style="background: #e3f2fd; color: #0d47a1; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase;">${escapeHtml(categoryStr)}</span>
+            <span style="background: #f1f3f5; color: #495057; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; margin-left: 4px;">Size: ${escapeHtml(availableSizes)}</span>
           </div>
           <h3 style="margin: 5px 0; color: #222; font-size: 16px;">${escapeHtml(p.name)}</h3>
           <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 16px; font-weight: bold; margin: 5px 0 15px 0;">${priceDisplay}</p>
@@ -393,19 +433,23 @@ app.get('/catalog', async (req, res) => {
           data-id="${p.id}"
           data-name="${escapeHtml(p.name)}"
           data-price="${priceFormatted}"
+          data-sizes="${escapeHtml(availableSizes)}"
           onclick="handleOrderClick(this)"
           style="background: #25D366; color: white; padding: 10px 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%;">
           🛒 Agiza Sasa
         </button>
       </div>`;
     }).join('');
+
     if (products.length === 0) {
       productCards = '<p style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
     }
+
     res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="sw">
     <head>
+      <meta charset="UTF-8">
       <title>${escapeHtml(shopName)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
@@ -421,13 +465,14 @@ app.get('/catalog', async (req, res) => {
         .filter-bar select { flex: 1; min-width: 140px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
         h1 { color: #111; font-size: 24px; margin: 0; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: white; padding: 25px; border-radius: 12px; width: 90%; max-width: 380px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); justify-content: center; align-items: center; z-index: 1000; padding: 15px; box-sizing: border-box; }
+        .modal-content { background: white; padding: 22px; border-radius: 12px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
         .close-btn { position: absolute; top: 12px; right: 15px; font-size: 24px; cursor: pointer; color: #aaa; border: none; background: none; }
-        .form-group { margin-bottom: 15px; text-align: left; }
-        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; color: #333; font-size: 13px; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
-        .submit-btn { background: #25D366; color: white; border: none; padding: 12px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+        .form-group { margin-bottom: 12px; text-align: left; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 4px; color: #333; font-size: 12px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 9px 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
+        .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .submit-btn { background: #25D366; color: white; border: none; padding: 12px; width: 100%; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 8px; }
       </style>
     </head>
     <body>
@@ -454,49 +499,168 @@ app.get('/catalog', async (req, res) => {
           ${productCards}
         </div>
       </div>
+
+      <!-- Lightbox Image Modal -->
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 20px; box-sizing: border-box;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
+
+      <!-- Enhanced Order Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="closeModal()">&times;</button>
           <h3 style="margin-top:0; color:#111; font-size:18px;" id="modalProductName">Agiza Bidhaa</h3>
-          <p style="color:#28a745; font-weight:bold; margin-top:-5px; font-size:15px;" id="modalProductPrice"></p>
+          <p style="color:#28a745; font-weight:bold; margin-top:-5px; margin-bottom: 12px; font-size:15px;" id="modalProductPrice"></p>
           <input type="hidden" id="selectedProductId">
           <input type="hidden" id="selectedProductName">
           <input type="hidden" id="selectedProductPrice">
+
           <div class="form-group">
-            <label>Namba yako ya Simu:</label>
-            <input type="text" id="orderPhone" placeholder="Mfano: 0712345678" required>
+            <label>Namba ya Simu (Namba tupu, zisizozidi 10):</label>
+            <input type="tel" id="orderPhone" placeholder="0712345678" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10)" required>
           </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Chagua Mkoa:</label>
+              <select id="orderRegion" onchange="updateOrderDistricts()" required>
+                <option value="">-- Mkoa --</option>
+                <option value="Dar es Salaam">Dar es Salaam</option>
+                <option value="Arusha">Arusha</option>
+                <option value="Dodoma">Dodoma</option>
+                <option value="Mwanza">Mwanza</option>
+                <option value="Mbeya">Mbeya</option>
+                <option value="Kilimanjaro">Kilimanjaro</option>
+                <option value="Tanga">Tanga</option>
+                <option value="Morogoro">Morogoro</option>
+                <option value="Mtwara">Mtwara</option>
+                <option value="Iringa">Iringa</option>
+                <option value="Tabora">Tabora</option>
+                <option value="Kigoma">Kigoma</option>
+                <option value="Shinyanga">Shinyanga</option>
+                <option value="Kagera">Kagera</option>
+                <option value="Mara">Mara</option>
+                <option value="Pwani">Pwani</option>
+                <option value="Singida">Singida</option>
+                <option value="Rukwa">Rukwa</option>
+                <option value="Ruvuma">Ruvuma</option>
+                <option value="Lindi">Lindi</option>
+                <option value="Geita">Geita</option>
+                <option value="Simiyu">Simiyu</option>
+                <option value="Njombe">Njombe</option>
+                <option value="Katavi">Katavi</option>
+                <option value="Songwe">Songwe</option>
+                <option value="Manyara">Manyara</option>
+                <option value="Zanzibar">Zanzibar</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Chagua Wilaya:</label>
+              <select id="orderDistrict" required>
+                <option value="">-- Kwanza Mkoa --</option>
+              </select>
+            </div>
+          </div>
+
           <div class="form-group">
-            <label>Eneo Unapoishi / Mkoa:</label>
-            <input type="text" id="orderLocation" placeholder="Mfano: Dar es Salaam, Sinza" required>
+            <label>Kata / Mtaa Unapoishi:</label>
+            <input type="text" id="orderWard" placeholder="Mfano: Sinza, Kariakoo, Kijitonyama" required>
           </div>
-          <div class="form-group">
-            <label>Size / Saizi (kama ipo):</label>
-            <input type="text" id="orderSize" placeholder="Mfano: M, L, XL, 42">
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Chagua Size:</label>
+              <select id="orderSize">
+                <option value="Standard">Standard</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Chagua Rangi (Color):</label>
+              <select id="orderColor">
+                <option value="Kama ilivyo pichani">Kama pichani</option>
+                <option value="Nyeusi (Black)">Nyeusi (Black)</option>
+                <option value="Nyeupe (White)">Nyeupe (White)</option>
+                <option value="Bluu (Blue)">Bluu (Blue)</option>
+                <option value="Nyekundu (Red)">Nyekundu (Red)</option>
+                <option value="Kijani (Green)">Kijani (Green)</option>
+                <option value="Njano (Yellow)">Njano (Yellow)</option>
+                <option value="Kijivu (Grey)">Kijivu (Grey)</option>
+                <option value="Kahawia (Brown)">Kahawia (Brown)</option>
+              </select>
+            </div>
           </div>
+
           <div class="form-group">
             <label>Idadi (Quantity):</label>
             <input type="number" id="orderQty" value="1" min="1">
           </div>
+
+          <div class="form-group">
+            <label>Maelezo ya Ziada (Si lazima):</label>
+            <textarea id="orderNotes" rows="2" placeholder="Mfano: Niletee saa 10 jioni, au nipigie ukifika..."></textarea>
+          </div>
+
           <button class="submit-btn" onclick="sendToWhatsApp()">📲 Tuma Oda kwa WhatsApp</button>
         </div>
       </div>
+
       <script>
         var BOT_PHONE = "${botPhone}";
+        const orderDistrictsData = {
+          "Dar es Salaam": ["Kinondoni", "Ilala", "Temeke", "Ubungo", "Kigamboni"],
+          "Arusha": ["Arusha Mjini", "Arumeru", "Karatu", "Longido", "Ngorongoro", "Monduli"],
+          "Dodoma": ["Dodoma Mjini", "Bahi", "Chamwino", "Chemba", "Kondoa", "Kongwa", "Mpwapwa"],
+          "Mwanza": ["Ilemela", "Nyamagana", "Magu", "Misungwi", "Sengerema", "Ukerewe", "Kwimba"],
+          "Mbeya": ["Mbeya Mjini", "Mbeya Vijijini", "Rungwe", "Kyela", "Mbozi", "Chunya"],
+          "Kilimanjaro": ["Moshi Mjini", "Moshi Vijijini", "Hai", "Rombo", "Mwanga", "Same", "Siha"],
+          "Tanga": ["Tanga Mjini", "Muheza", "Korogwe", "Handeni", "Pangani", "Lushoto", "Kilindi"],
+          "Morogoro": ["Morogoro Mjini", "Morogoro Vijijini", "Kilombero", "Kilosa", "Ulanga", "Gairo", "Malinyi"],
+          "Mtwara": ["Mtwara Mjini", "Masasi", "Newala", "Tandahimba", "Nanyumbu"],
+          "Iringa": ["Iringa Mjini", "Iringa Vijijini", "Kilolo", "Mufindi"],
+          "Tabora": ["Tabora Mjini", "Igunga", "Nzega", "Urambo", "Sikonge", "Kaliua"],
+          "Kigoma": ["Kigoma Ujiji", "Kasulu", "Kibondo", "Buhigwe", "Uvinza", "Kakonko"],
+          "Shinyanga": ["Shinyanga Mjini", "Kahama", "Kishapu"],
+          "Kagera": ["Bukoba Mjini", "Bukoba Vijijini", "Muleba", "Karagwe", "Ngara", "Biharamulo"],
+          "Mara": ["Musoma Mjini", "Tarime", "Serengeti", "Bunda", "Rorya", "Butiama"],
+          "Pwani": ["Kibaha", "Bagamoyo", "Kisarawe", "Mkuranga", "Rufiji", "Mafia"],
+          "Singida": ["Singida Mjini", "Iramba", "Manyoni", "Ikungi", "Mkalama"],
+          "Rukwa": ["Sumbawanga Mjini", "Kalambo", "Nkasi"],
+          "Ruvuma": ["Songea Mjini", "Mbinga", "Tunduru", "Namtumbo", "Nyasa"],
+          "Lindi": ["Lindi Mjini", "Kilwa", "Nachingwea", "Liwale", "Ruangwa"],
+          "Geita": ["Geita Mjini", "Chato", "Bukombe", "Mbogwe", "Nyang'hwale"],
+          "Simiyu": ["Bariadi", "Maswa", "Meatu", "Itilima", "Busega"],
+          "Njombe": ["Njombe Mjini", "Makambako", "Wanging'ombe", "Ludewa", "Makete"],
+          "Katavi": ["Mpanda Mjini", "Mlele", "Tanganyika"],
+          "Songwe": ["Vwawa (Mbozi)", "Tunduma", "Ileje", "Momba", "Songwe"],
+          "Manyara": ["Babati", "Hanang", "Mbulu", "Kiteto", "Simanjiro"],
+          "Zanzibar": ["Mjini Magharibi", "Kaskazini Unguja", "Kusini Unguja", "Kaskazini Pemba", "Kusini Pemba"]
+        };
+
+        function updateOrderDistricts() {
+          const regionSelect = document.getElementById("orderRegion");
+          const districtSelect = document.getElementById("orderDistrict");
+          const selectedRegion = regionSelect.value;
+          districtSelect.innerHTML = '<option value="">-- Chagua Wilaya --</option>';
+          if (selectedRegion && orderDistrictsData[selectedRegion]) {
+            orderDistrictsData[selectedRegion].forEach(district => {
+              const opt = document.createElement("option");
+              opt.value = district;
+              opt.textContent = district;
+              districtSelect.appendChild(opt);
+            });
+          }
+        }
+
         function openImgModal(src) {
           if (!src) return;
-          var modal = document.getElementById('fullImgModal');
-          var img = document.getElementById('lightboxImage');
-          img.src = src;
-          modal.style.display = 'flex';
+          document.getElementById('lightboxImage').src = src;
+          document.getElementById('fullImgModal').style.display = 'flex';
         }
         function closeImgModal() {
           document.getElementById('fullImgModal').style.display = 'none';
         }
+
         function filterCatalog() {
           var searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
           var catVal = document.getElementById('categorySelect').value.toLowerCase();
@@ -510,43 +674,94 @@ app.get('/catalog', async (req, res) => {
             var matchesSearch = cardName.indexOf(searchVal) !== -1 || cardShopName.indexOf(searchVal) !== -1;
             var matchesCat = (catVal === 'all' || cardCat === catVal);
             var matchesShop = (shopVal === 'all' || cardShop === shopVal);
-            if (matchesSearch && matchesCat && matchesShop) {
-              cards[i].style.display = 'flex';
-            } else {
-              cards[i].style.display = 'none';
-            }
+            cards[i].style.display = (matchesSearch && matchesCat && matchesShop) ? 'flex' : 'none';
           }
         }
+
         function handleOrderClick(btn) {
           var id = btn.getAttribute('data-id');
           var name = btn.getAttribute('data-name');
           var price = btn.getAttribute('data-price');
-          openModal(id, name, price);
+          var sizesStr = btn.getAttribute('data-sizes') || 'Standard';
+          openModal(id, name, price, sizesStr);
         }
-        function openModal(id, name, price) {
+
+        function openModal(id, name, price, sizesStr) {
           document.getElementById('selectedProductId').value = id;
           document.getElementById('selectedProductName').value = name;
           document.getElementById('selectedProductPrice').value = price;
           document.getElementById('modalProductName').innerText = '🛒 ' + name;
           document.getElementById('modalProductPrice').innerText = 'Bei: TSh ' + price;
+
+          // Weka fomu iwe tupu kila inapofunguliwa
+          document.getElementById('orderPhone').value = '';
+          document.getElementById('orderRegion').value = '';
+          document.getElementById('orderDistrict').innerHTML = '<option value="">-- Kwanza Mkoa --</option>';
+          document.getElementById('orderWard').value = '';
+          document.getElementById('orderQty').value = '1';
+          document.getElementById('orderNotes').value = '';
+
+          // Jaza sizes zilizopo kwenye bidhaa
+          const sizeSelect = document.getElementById('orderSize');
+          sizeSelect.innerHTML = '';
+          const parsedSizes = sizesStr.split(',').map(s => s.trim()).filter(Boolean);
+          if (parsedSizes.length > 0) {
+            parsedSizes.forEach(s => {
+              const opt = document.createElement('option');
+              opt.value = s;
+              opt.textContent = s;
+              sizeSelect.appendChild(opt);
+            });
+          } else {
+            sizeSelect.innerHTML = '<option value="Standard">Standard</option>';
+          }
+
           document.getElementById('orderModal').style.display = 'flex';
         }
+
         function closeModal() {
           document.getElementById('orderModal').style.display = 'none';
         }
+
         function sendToWhatsApp() {
           var id = document.getElementById('selectedProductId').value;
           var name = document.getElementById('selectedProductName').value;
           var price = document.getElementById('selectedProductPrice').value;
-          var phone = document.getElementById('orderPhone').value || 'Haikutajwa';
-          var location = document.getElementById('orderLocation').value || 'Haikutajwa';
-          var size = document.getElementById('orderSize').value || 'Haikutajwa';
+          var phone = document.getElementById('orderPhone').value.trim();
+          var region = document.getElementById('orderRegion').value;
+          var district = document.getElementById('orderDistrict').value;
+          var ward = document.getElementById('orderWard').value.trim();
+          var size = document.getElementById('orderSize').value || 'Standard';
+          var color = document.getElementById('orderColor').value || 'Kama pichani';
           var qty = document.getElementById('orderQty').value || 1;
-          var message = '!agiza ' + id + '\\n\\n*TAARIFA ZA ODA:*\\n📦 Bidhaa: ' + name + '\\n💰 Bei: TSh ' + price + '\\n📞 Simu: ' + phone + '\\n📍 Eneo: ' + location + '\\n📏 Saizi: ' + size + '\\n🔢 Idadi: ' + qty;
+          var notes = document.getElementById('orderNotes').value.trim() || 'Hakuna';
+
+          if (!/^[0-9]{10}$/.test(phone)) {
+            alert('❌ Tafadhali weka namba ya simu sahihi yenye tarakimu 10 (mfano: 0712345678).');
+            return;
+          }
+          if (!region || !district || !ward) {
+            alert('❌ Tafadhali chagua Mkoa, Wilaya, na ujaze Kata unapoishi.');
+            return;
+          }
+
+          var fullLocation = ward + ', ' + district + ', ' + region;
+          var message = '!agiza ' + id +
+            '\\n\\n*TAARIFA ZA ODA:*' +
+            '\\n📦 Bidhaa: ' + name +
+            '\\n💰 Bei: TSh ' + price +
+            '\\n📞 Simu: ' + phone +
+            '\\n📍 Eneo: ' + fullLocation +
+            '\\n📏 Saizi: ' + size +
+            '\\n🎨 Rangi: ' + color +
+            '\\n🔢 Idadi: ' + qty +
+            '\\n📝 Maelezo: ' + notes;
+
           var waUrl = 'https://wa.me/' + BOT_PHONE + '?text=' + encodeURIComponent(message);
           window.open(waUrl, '_blank');
           closeModal();
         }
+
         window.onclick = function(e) {
           if (e.target === document.getElementById('orderModal')) closeModal();
         };
@@ -689,26 +904,31 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Winga Login Routes (With Register Link)
+// Unified Login Page (Winga Admin & Platform SuperAdmin)
 app.get('/login', (req, res) => {
+  if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
+  if (req.session && req.session.wingaId) return res.redirect('/admin');
+
   res.send(`
   <!DOCTYPE html>
-  <html>
+  <html lang="sw">
   <head>
-    <title>Winga Login</title>
+    <meta charset="UTF-8">
+    <title>Winga Portal Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .login-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 300px; }
-      input { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
-      button { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
-      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 8px; }
+      .login-box { background: white; padding: 35px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: center; width: 310px; }
+      input { padding: 10px; width: 100%; margin: 8px 0 14px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
+      button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 10px; }
     </style>
   </head>
   <body>
     <div class="login-box">
-      <h2>🛍️ Winga Portal Login</h2>
+      <h2 style="margin-top:0;">🛍️ Winga Portal Login</h2>
       <form action="/login" method="POST">
-        <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Namba ya Simu:</label>
+        <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Namba ya Simu / Username:</label>
         <input type="text" name="phone" placeholder="0712345678" required>
         <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Password:</label>
         <input type="password" name="password" placeholder="••••••••" required>
@@ -724,12 +944,21 @@ app.get('/login', (req, res) => {
 
 app.post('/login', async (req, res) => {
   try {
-    const phone = (req.body.phone || '').trim();
+    const identifier = (req.body.phone || '').trim();
     const password = (req.body.password || '').trim();
-    if (!phone || !password) {
-      return res.send('❌ Tafadhali jaza namba ya simu na nywila. <br><a href="/login">Jaribu Tena</a>');
+    if (!identifier || !password) {
+      return res.send('❌ Tafadhali jaza taarifa za kuingia. <br><a href="/login">Jaribu Tena</a>');
     }
-    const matchedWinga = await db('wingas').where({ phone }).first();
+
+    // 1. Angalia kama ni SuperAdmin
+    const superAdminPass = process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!';
+    if (identifier.toLowerCase() === 'admin' && password === superAdminPass) {
+      req.session.isSuperAdmin = true;
+      return res.redirect('/superadmin');
+    }
+
+    // 2. Angalia kama ni Muuzaji (Winga)
+    const matchedWinga = await db('wingas').where({ phone: identifier }).first();
     if (matchedWinga) {
       const isPasswordValid = await bcrypt.compare(password, matchedWinga.password);
       if (isPasswordValid) {
@@ -738,6 +967,7 @@ app.post('/login', async (req, res) => {
         return res.redirect('/admin');
       }
     }
+
     res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
   } catch (err) {
     console.error('Login error:', err);
@@ -745,7 +975,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Self-Registration Routes (With Region, District & Ward selectors)
+// Winga Self-Registration Routes
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -753,6 +983,7 @@ app.get('/register', (req, res) => {
   <head>
     <meta charset="UTF-8">
     <title>Jisajili kama Muuzaji - Winga Shop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
       .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 340px; }
@@ -798,7 +1029,7 @@ app.get('/register', (req, res) => {
         <input type="text" name="name" placeholder="Mf: Boss Store" required>
 
         <label>Namba ya Simu (WhatsApp):</label>
-        <input type="text" name="phone" placeholder="0712345678" required>
+        <input type="tel" name="phone" placeholder="0712345678" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10)" required>
 
         <label>Chagua Mkoa:</label>
         <select name="region" id="regionSelect" onchange="updateDistricts()" required>
@@ -841,7 +1072,7 @@ app.post('/register', async (req, res) => {
     const district = (req.body.district || '').trim();
     const ward = (req.body.ward || '').trim();
     const password = (req.body.password || '').trim();
-    
+
     if (!name || !phone || !region || !district || !ward || !password) {
       return res.send('❌ Tafadhali jaza taarifa zote na eneo vizuri. <br><a href="/register">Jaribu Tena</a>');
     }
@@ -853,7 +1084,7 @@ app.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + 30);
-    
+
     await db('wingas').insert({
       name,
       phone,
@@ -863,7 +1094,7 @@ app.post('/register', async (req, res) => {
       expiryDate: expiry,
       dateAdded: new Date()
     });
-    
+
     res.send(`
     <div style="text-align:center; padding:50px; font-family:sans-serif;">
       <h2 style="color:#28a745;">🎉 Usajili Umefanikiwa!</h2>
@@ -873,7 +1104,7 @@ app.post('/register', async (req, res) => {
     `);
   } catch (err) {
     console.error('Registration error:', err);
-    res.status(500).send('Hitilafu ya Server wakati wa kusajili.');
+    res.status(500).send(`❌ Hitilafu ya Server wakati wa kusajili: ${escapeHtml(err.message)}`);
   }
 });
 
@@ -882,11 +1113,11 @@ app.all('/logout', (req, res) => {
   req.session.destroy((err) => {
     if (err) console.error('Session destruction error:', err);
     res.clearCookie('connect.sid');
-    return res.redirect('/');
+    return res.redirect('/login');
   });
 });
 
-// Admin Dashboard for Winga (With Subscription Countdown, Chart.js Analytics, Invoice Download & Subscription Payment)
+// Admin Dashboard for Winga
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -911,7 +1142,6 @@ app.get('/admin', requireWinga, async (req, res) => {
     const orders = await db('orders').where({ wingaId: currentWingaId });
     const reviews = await db('reviews').select('*');
 
-    // Hesabu siku zilizobaki za kifurushi (Subscription Countdown)
     let subscriptionBanner = '';
     if (currentWinga && currentWinga.expiryDate) {
       const expiryDate = new Date(currentWinga.expiryDate);
@@ -934,7 +1164,6 @@ app.get('/admin', requireWinga, async (req, res) => {
       }
     }
 
-    // Kuandaa Data za Chart.js Kutoka Kwenye Database Halisi
     let salesByDate = {};
     orders.forEach(o => {
       if (o.status === 'Completed' && o.date) {
@@ -975,9 +1204,6 @@ app.get('/admin', requireWinga, async (req, res) => {
         ).join('');
         productImgHtml = `<div style="display: flex; gap: 4px; flex-direction: row; align-items: center; max-width: 110px; overflow-x: auto; padding: 2px 0;">${thumbHtml}</div>`;
       }
-      const safeName = escapeHtml(p.name);
-      const safeCategory = escapeHtml(p.category || 'General');
-      const safeSize = escapeHtml(p.size || 'Standard');
       const buyingPrice = Number(p.buyingPrice || 0);
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
       return `
@@ -1062,7 +1288,6 @@ app.get('/admin', requireWinga, async (req, res) => {
     <head>
       <title>Winga Dashboard - ${escapeHtml(currentWingaName)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <!-- Chart.js CDN Library -->
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f4f6f8; color: #333; }
@@ -1135,7 +1360,6 @@ app.get('/admin', requireWinga, async (req, res) => {
           <div class="stat-card"><h3>Net Profit Earned</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
 
-        <!-- Chart.js Analytics Section -->
         <div class="card">
           <h2>📊 Takwimu za Mauzo ya Hivi Karibuni (Analytics)</h2>
           <div style="position: relative; height: 250px; width: 100%;">
@@ -1144,7 +1368,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         </div>
         <script>
           const ctx = document.getElementById('salesAnalyticsChart').getContext('2d');
-          const salesAnalyticsChart = new Chart(ctx, {
+          new Chart(ctx, {
             type: 'bar',
             data: {
               labels: ${safeChartLabels},
@@ -1164,9 +1388,7 @@ app.get('/admin', requireWinga, async (req, res) => {
                 y: {
                   beginAtZero: true,
                   ticks: {
-                    callback: function(value) {
-                      return 'TSh ' + value.toLocaleString();
-                    }
+                    callback: function(value) { return 'TSh ' + value.toLocaleString(); }
                   }
                 }
               }
@@ -1186,7 +1408,7 @@ app.get('/admin', requireWinga, async (req, res) => {
               <div class="form-group"><label>Selling Price (TSh)</label><input type="number" name="sellingPrice" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Size</label><input type="text" name="size" value="Standard"></div>
+              <div class="form-group"><label>Available Sizes (Tenganisha kwa koma, mf: S, M, L, XL)</label><input type="text" name="size" value="Standard"></div>
               <div class="form-group">
                 <label>Product Photos (Max 4)</label>
                 <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
@@ -1262,7 +1484,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
     const orderId = parseInt(req.query.id);
     const order = await db('orders').where({ orderId, wingaId: req.session.wingaId }).first();
     if (!order) return res.send('❌ Oda haipatikani au sio ya duka lako.');
-    
+
     const winga = await db('wingas').where({ id: req.session.wingaId }).first();
     const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
     const shopLink = `${dynamicBaseUrl}/catalog?shop=${winga.id}`;
@@ -1313,7 +1535,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   }
 });
 
-// Routes za Malipo ya Kifurushi (Subscription Mobile Money / Lipa Namba Simulation)
+// Subscription Payment Routes
 app.get('/admin/pay-subscription', requireWinga, async (req, res) => {
   try {
     const winga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1371,7 +1593,7 @@ app.post('/admin/process-payment', requireWinga, async (req, res) => {
     if (!winga) return res.redirect('/login');
 
     const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
-    baseDate.setDate(baseDate.getDate() + 30); // Ongeza siku 30
+    baseDate.setDate(baseDate.getDate() + 30);
 
     await db('wingas').where({ id: wingaId }).update({
       expiryDate: baseDate,
@@ -1405,7 +1627,6 @@ app.post('/admin/process-payment', requireWinga, async (req, res) => {
   }
 });
 
-// Webhook endpoint ya kupokea ujumbe kutoka kwa Payment Gateway ya nje (Kama AzamPay / PesaPal)
 app.post('/api/payment/webhook', async (req, res) => {
   try {
     const { phone, status } = req.body;
@@ -1425,7 +1646,7 @@ app.post('/api/payment/webhook', async (req, res) => {
   }
 });
 
-// Admin Add Product Route (With Cloudinary Upload Integration)
+// Admin Add Product Route
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -1467,7 +1688,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
 
       const newProduct = await db('products').where({ id: insertedId }).first();
       const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
-            
+
       if (currentWinga && newProduct) {
         notifyShopCustomers(currentWinga, newProduct);
       }
@@ -1614,7 +1835,7 @@ app.post('/forgot-password', async (req, res) => {
     const rawPhone = (req.body.phone || '').trim();
     let cleanedPhone = rawPhone.replace(/\D/g, '');
     if (cleanedPhone.startsWith('0')) cleanedPhone = '255' + cleanedPhone.slice(1);
-    
+
     const winga = await db('wingas').where({ phone: rawPhone }).orWhere({ phone: cleanedPhone }).first();
     if (!winga) return res.send('❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>');
 
@@ -1622,7 +1843,7 @@ app.post('/forgot-password', async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db('password_resets').where({ phone: winga.phone }).del();
     await db('password_resets').insert({ phone: winga.phone, otp, expiresAt });
-    
+
     const targetJid = `${cleanedPhone}@s.whatsapp.net`;
     await sock.sendMessage(targetJid, { text: `🔑 Kodi yako ya OTP ni: *${otp}* (Inaisha baada ya dakika 10).` });
 
@@ -1657,19 +1878,19 @@ app.post('/reset-password', async (req, res) => {
     }
     const resetRecord = await db('password_resets').where({ phone: phone.trim(), otp: otp.trim() }).where('expiresAt', '>', new Date()).first();
     if (!resetRecord) return res.send('❌ Kodi si sahihi au imeisha muda wake. <br><a href="/forgot-password">Omba Mpya</a>');
-    
+
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
     await db('wingas').where({ phone: phone.trim() }).update({ password: hashedPassword });
     await db('password_resets').where({ phone: phone.trim() }).del();
-    
+
     res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif;"><h2 style="color:#28a745;">🎉 Hongera!</h2><p>Nenosiri limebadilishwa.</p><a href="/login">Ingia Login</a></div>`);
   } catch (err) {
     res.status(500).send('❌ Hitilafu ya Server.');
   }
 });
 
-// Super Admin Routes
-app.get('/superadmin', async (req, res) => {
+// Super Admin Routes (Protected by Session Login)
+app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
     const products = await db('products').select('*');
@@ -1784,7 +2005,6 @@ app.get('/superadmin', async (req, res) => {
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
         th { background: #f8f9fa; }
         button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
-        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
       </style>
     </head>
     <body>
@@ -1826,21 +2046,21 @@ app.get('/superadmin', async (req, res) => {
   }
 });
 
-app.post('/superadmin/product/delete', async (req, res) => {
+app.post('/superadmin/product/delete', requireSuperAdmin, async (req, res) => {
   try {
     await db('products').where({ id: parseInt(req.body.id) }).del();
   } catch (err) {}
   res.redirect('/superadmin');
 });
 
-app.post('/superadmin/winga/status', async (req, res) => {
+app.post('/superadmin/winga/status', requireSuperAdmin, async (req, res) => {
   try {
     await db('wingas').where({ id: parseInt(req.body.wingaId) }).update({ status: req.body.status });
   } catch (err) {}
   res.redirect('/superadmin');
 });
 
-app.post('/superadmin/winga/extend', async (req, res) => {
+app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
   try {
     const winga = await db('wingas').where({ id: parseInt(req.body.wingaId) }).first();
     if (winga) {
