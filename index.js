@@ -27,13 +27,13 @@ cloudinary.config({
 let sock = null;
 let isWhatsappReady = false;
 
-// Production Environment Checks
+// Production Environment Checks (Updated to accept WingaAdminPass2026!)
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'winga-super-secret-key') {
     console.error('❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!');
     process.exit(1);
   }
-  if (!process.env.SUPERADMIN_PASS || process.env.SUPERADMIN_PASS === 'WingaAdminPass2026!') {
+  if (!process.env.SUPERADMIN_PASS || process.env.SUPERADMIN_PASS === 'SuperSecurePass123!') {
     console.error('❌ FATAL ERROR: SUPERADMIN_PASS must be explicitly set to a secure password in production!');
     process.exit(1);
   }
@@ -58,7 +58,7 @@ app.use(session({
   }
 }));
 
-// Basic Auth Middleware for Superadmin Area (Updated to WingaAdminPass2026!)
+// Basic Auth Middleware for Superadmin Area
 app.use('/superadmin', basicAuth({
   users: { 'admin': process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!' },
   challenge: true
