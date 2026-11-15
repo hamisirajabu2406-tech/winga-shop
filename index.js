@@ -144,7 +144,6 @@ async function connectToWhatsApp() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Incoming Message Handler for Baileys
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
@@ -154,7 +153,6 @@ async function connectToWhatsApp() {
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
       const lowerText = text.toLowerCase();
 
-      // 1. WhatsApp Instant Review/Feedback Handler (!maoni)
       if (lowerText.startsWith('!maoni')) {
         const parts = text.split(/\s+/);
         const orderId = parseInt(parts[1]);
@@ -166,7 +164,7 @@ async function connectToWhatsApp() {
         }
         const orderExists = await db('orders').where({ orderId }).first();
         if (!orderExists) {
-          await sock.sendMessage(remoteJid, { text: `❌ Haikuwezekana kupata Oda #${orderId}. Hakikisha namba ya oda ni sahihi.` });
+          await sock.sendMessage(remoteJid, { text: `❌ Haikuwezekana kupata Oda #${orderId}.` });
           continue;
         }
         const existingReview = await db('reviews').where({ orderId }).first();
@@ -179,7 +177,6 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      // 2. Order Command (!agiza / !order)
       if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
         let productID = null;
         let location = 'Haikutajwa';
@@ -281,7 +278,6 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      // 3. Greeting Keywords
       const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
       if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
         await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${BASE_URL}/catalog` });
@@ -291,7 +287,6 @@ async function connectToWhatsApp() {
   });
 }
 
-// Helper: Broadcast New Product Notification
 async function notifyShopCustomers(winga, newProduct) {
   try {
     if (!isWhatsappReady || !sock) return;
@@ -325,7 +320,6 @@ async function notifyShopCustomers(winga, newProduct) {
   }
 }
 
-// Helper: Notify Winga of New Order
 async function notifyWinga(order, product) {
   try {
     if (!isWhatsappReady || !sock) return;
@@ -358,12 +352,11 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Landing Page
+// Landing Page (Haina tena Admin Login Link)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Public Catalog Route (Fully Mobile Responsive)
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -458,7 +451,7 @@ app.get('/catalog', async (req, res) => {
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 12px; color: #333; }
         .container { max-width: 900px; margin: 0 auto; }
         .header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
-        .nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; sm-width: auto; }
+        .nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; }
         .track-btn { background: #007bff; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; flex: 1; text-align: center; }
         .contact-btn { background: #25D366; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; text-align: center; }
         .filter-bar { display: flex; gap: 8px; margin-bottom: 15px; flex-direction: column; }
@@ -509,13 +502,11 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Lightbox Image Modal -->
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 15px; box-sizing: border-box;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
-      <!-- Enhanced Order Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="closeModal()">&times;</button>
@@ -781,7 +772,6 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Order Tracking Routes (Mobile Responsive)
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -911,7 +901,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Unified Login Page (Mobile Responsive)
+// Unified Login Page (Ina Eye Icon ya Password)
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -928,7 +918,10 @@ app.get('/login', (req, res) => {
       body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; padding: 15px; }
       .login-box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: center; width: 100%; max-width: 320px; }
       input { padding: 11px; width: 100%; margin: 8px 0 14px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 15px; }
-      button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
+      .password-container { position: relative; width: 100%; }
+      .password-container input { margin-bottom: 14px; padding-right: 40px; }
+      .eye-btn { position: absolute; right: 10px; top: 38%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; }
+      button.submit-btn { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
       a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 10px; }
     </style>
   </head>
@@ -938,13 +931,30 @@ app.get('/login', (req, res) => {
       <form action="/login" method="POST">
         <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Namba ya Simu / Username:</label>
         <input type="text" name="phone" placeholder="0712345678" required>
+        
         <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Password:</label>
-        <input type="password" name="password" placeholder="••••••••" required>
-        <button type="submit">Ingia Dashboard</button>
+        <div class="password-container">
+          <input type="password" name="password" id="loginPassword" placeholder="••••••••" required>
+          <button type="button" class="eye-btn" onclick="togglePassword('loginPassword', this)">👁️</button>
+        </div>
+
+        <button type="submit" class="submit-btn">Ingia Dashboard</button>
       </form>
       <a href="/forgot-password">🔑 Umesahau Nenosiri?</a>
       <a href="/register" style="color: #28a745; font-weight: bold;">📝 Jisajili kama Muuzaji Mpya</a>
     </div>
+    <script>
+      function togglePassword(fieldId, btn) {
+        const input = document.getElementById(fieldId);
+        if (input.type === "password") {
+          input.type = "text";
+          btn.textContent = "🙈";
+        } else {
+          input.type = "password";
+          btn.textContent = "👁️";
+        }
+      }
+    </script>
   </body>
   </html>
   `);
@@ -981,7 +991,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Self-Registration Routes (Mobile Responsive)
+// Winga Self-Registration (Ina Eye Icon ya Password)
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -995,6 +1005,9 @@ app.get('/register', (req, res) => {
       body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 15px; }
       .box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
       input, select { padding: 10px; width: 100%; margin: 6px 0 12px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+      .password-container { position: relative; width: 100%; margin: 6px 0 12px 0; }
+      .password-container input { margin: 0; padding-right: 40px; }
+      .eye-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; }
       label { display: block; text-align: left; font-size: 12px; font-weight: bold; color: #333; }
       button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
       a { color: #007bff; text-decoration: none; font-size: 13px; display: block; text-align: center; margin-top: 15px; }
@@ -1024,6 +1037,17 @@ app.get('/register', (req, res) => {
             opt.textContent = district;
             districtSelect.appendChild(opt);
           });
+        }
+      }
+
+      function togglePassword(fieldId, btn) {
+        const input = document.getElementById(fieldId);
+        if (input.type === "password") {
+          input.type = "text";
+          btn.textContent = "🙈";
+        } else {
+          input.type = "password";
+          btn.textContent = "👁️";
         }
       }
     </script>
@@ -1060,7 +1084,10 @@ app.get('/register', (req, res) => {
         <input type="text" name="ward" placeholder="Mf: Kariakoo, Msimbazi" required>
 
         <label>Weka Nenosiri (Password):</label>
-        <input type="password" name="password" placeholder="••••••••" required>
+        <div class="password-container">
+          <input type="password" name="password" id="regPassword" placeholder="••••••••" required>
+          <button type="button" class="eye-btn" onclick="togglePassword('regPassword', this)">👁️</button>
+        </div>
 
         <button type="submit">Jisajili Sasa</button>
       </form>
@@ -1115,7 +1142,6 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Logout Handler
 app.all('/logout', (req, res) => {
   req.session.destroy((err) => {
     if (err) console.error('Session destruction error:', err);
@@ -1124,13 +1150,12 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga (Mobile Responsive, Store Link Sharing & Admin Activation View)
+// Admin Dashboard (Haina tena Sales Graph, Ina Eye Icons kwenye Change Password)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
     
-    // Kama akaunti imesitishwa (suspended), onyesha ujumbe wa kuwasiliana na Admin
     if (currentWinga && currentWinga.status === 'suspended') {
       const renewalMsg = encodeURIComponent(`Habari Admin, nimefanya malipo ya siku 30 ya duka langu (${currentWinga.name} - ${currentWinga.phone}). Naomba unifungulie akaunti yangu.`);
       return res.send(`
@@ -1190,19 +1215,6 @@ app.get('/admin', requireWinga, async (req, res) => {
         </div>`;
       }
     }
-
-    let salesByDate = {};
-    orders.forEach(o => {
-      if (o.status === 'Completed' && o.date) {
-        const dateStr = new Date(o.date).toISOString().split('T')[0];
-        const rev = Number(o.sellingPrice || o.price || 0);
-        salesByDate[dateStr] = (salesByDate[dateStr] || 0) + rev;
-      }
-    });
-    const chartLabels = Object.keys(salesByDate).sort().slice(-7);
-    const chartDataValues = chartLabels.map(date => salesByDate[date]);
-    const safeChartLabels = chartLabels.length > 0 ? JSON.stringify(chartLabels) : JSON.stringify(["Leo"]);
-    const safeChartData = chartDataValues.length > 0 ? JSON.stringify(chartDataValues) : JSON.stringify([0]);
 
     let totalRevenue = 0;
     let totalCost = 0;
@@ -1316,7 +1328,6 @@ app.get('/admin', requireWinga, async (req, res) => {
     <head>
       <title>Winga Dashboard - ${escapeHtml(currentWingaName)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         * { box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; color: #333; }
@@ -1340,6 +1351,9 @@ app.get('/admin', requireWinga, async (req, res) => {
         }
         label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 12px; }
         input[type="text"], input[type="number"], input[type="file"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        .password-container { position: relative; width: 100%; }
+        .password-container input { padding-right: 40px; }
+        .eye-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; }
         button.btn-add { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; }
         .table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 600px; font-size: 13px; }
@@ -1360,7 +1374,6 @@ app.get('/admin', requireWinga, async (req, res) => {
           </div>
         </div>
 
-        <!-- Store Link & Sharing Card -->
         <div class="card" style="background: #e3f2fd; border: 1px solid #90caf9;">
           <h3 style="margin-top: 0; color: #0d47a1; font-size: 16px;">🔗 Link Yako ya Duka (Store Link)</h3>
           <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
@@ -1384,13 +1397,42 @@ app.get('/admin', requireWinga, async (req, res) => {
         <div class="card">
           <h3 style="font-size:16px;">🔑 Badilisha Nenosiri</h3>
           <form id="changePasswordForm">
-            <div class="form-group"><label>Nenosiri la Zamani:</label><input type="password" id="oldPassword" required></div>
-            <div class="form-group"><label>Nenosiri Jipya:</label><input type="password" id="newPassword" required></div>
-            <div class="form-group"><label>Rudia Nenosiri Jipya:</label><input type="password" id="confirmPassword" required></div>
+            <div class="form-group">
+              <label>Nenosiri la Zamani:</label>
+              <div class="password-container">
+                <input type="password" id="oldPassword" required>
+                <button type="button" class="eye-btn" onclick="togglePassword('oldPassword', this)">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Nenosiri Jipya:</label>
+              <div class="password-container">
+                <input type="password" id="newPassword" required>
+                <button type="button" class="eye-btn" onclick="togglePassword('newPassword', this)">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Rudia Nenosiri Jipya:</label>
+              <div class="password-container">
+                <input type="password" id="confirmPassword" required>
+                <button type="button" class="eye-btn" onclick="togglePassword('confirmPassword', this)">👁️</button>
+              </div>
+            </div>
             <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">Hifadhi Nenosiri</button>
           </form>
         </div>
         <script>
+          function togglePassword(fieldId, btn) {
+            const input = document.getElementById(fieldId);
+            if (input.type === "password") {
+              input.type = "text";
+              btn.textContent = "🙈";
+            } else {
+              input.type = "password";
+              btn.textContent = "👁️";
+            }
+          }
+
           document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const oldPassword = document.getElementById('oldPassword').value;
@@ -1416,42 +1458,6 @@ app.get('/admin', requireWinga, async (req, res) => {
           <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
           <div class="stat-card"><h3>Net Profit</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
-
-        <div class="card">
-          <h2>📊 Takwimu za Mauzo (Analytics)</h2>
-          <div style="position: relative; height: 220px; width: 100%;">
-            <canvas id="salesAnalyticsChart"></canvas>
-          </div>
-        </div>
-        <script>
-          const ctx = document.getElementById('salesAnalyticsChart').getContext('2d');
-          new Chart(ctx, {
-            type: 'bar',
-            data: {
-              labels: ${safeChartLabels},
-              datasets: [{
-                label: 'Mauzo (TSh)',
-                data: ${safeChartData},
-                backgroundColor: 'rgba(40, 167, 69, 0.7)',
-                borderColor: 'rgba(40, 167, 69, 1)',
-                borderWidth: 2,
-                borderRadius: 6
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: {
-                y: {
-                  beginAtZero: true,
-                  ticks: {
-                    callback: function(value) { return 'TSh ' + value.toLocaleString(); }
-                  }
-                }
-              }
-            }
-          });
-        </script>
 
         <div class="card">
           <h2>Weka Bidhaa Mpya (Max Picha 4)</h2>
@@ -1542,7 +1548,6 @@ app.get('/admin', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Order Invoice / PDF Receipt Route
 app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   try {
     const orderId = parseInt(req.query.id);
@@ -1600,7 +1605,6 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Add Product Route
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -1654,7 +1658,6 @@ app.post('/admin/add', requireWinga, (req, res) => {
   });
 });
 
-// Delete Product
 app.post('/admin/product/delete', requireWinga, async (req, res) => {
   try {
     const { id } = req.body;
@@ -1665,7 +1668,6 @@ app.post('/admin/product/delete', requireWinga, async (req, res) => {
   res.redirect('/admin');
 });
 
-// Order Status Update
 app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
     const { orderId, status } = req.body;
@@ -1707,7 +1709,6 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
   res.redirect('/admin');
 });
 
-// Change Password Route
 app.post('/admin/change-password', requireWinga, async (req, res) => {
   const wingaId = req.session.wingaId;
   const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -1733,7 +1734,7 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password Routes (WhatsApp OTP) (Mobile Responsive)
+// Forgot & Reset Password (Ina Eye Icon)
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -1791,6 +1792,23 @@ app.post('/forgot-password', async (req, res) => {
     <head>
       <title>Reset</title>
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+      <style>
+        .password-container { position: relative; width: 100%; margin: 8px 0; }
+        .password-container input { width: 100%; padding: 11px; box-sizing: border-box; font-size: 15px; padding-right: 40px; }
+        .eye-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; }
+      </style>
+      <script>
+        function togglePassword(fieldId, btn) {
+          const input = document.getElementById(fieldId);
+          if (input.type === "password") {
+            input.type = "text";
+            btn.textContent = "🙈";
+          } else {
+            input.type = "password";
+            btn.textContent = "👁️";
+          }
+        }
+      </script>
     </head>
     <body style="font-family:sans-serif; background:rgb(106, 136, 232); display:flex; justify-content:center; align-items:center; height:100vh; margin:0; padding:15px; box-sizing:border-box;">
       <div style="background:white; padding:25px; border-radius:8px; text-align:center; width:100%; max-width:320px;">
@@ -1798,9 +1816,17 @@ app.post('/forgot-password', async (req, res) => {
         <form action="/reset-password" method="POST">
           <input type="hidden" name="phone" value="${escapeHtml(winga.phone)}">
           <input type="text" name="otp" placeholder="Kodi ya OTP" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
-          <input type="password" name="newPassword" placeholder="Nenosiri Jipya" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
-          <input type="password" name="confirmPassword" placeholder="Rudia Nenosiri Jipya" required style="width:100%; padding:11px; margin:8px 0; box-sizing:border-box; font-size:15px;">
-          <button type="submit" style="background:#28a745; color:white; border:none; padding:12px; width:100%; font-weight:bold; cursor:pointer; border-radius:4px; font-size:16px;">Hifadhi</button>
+          
+          <div class="password-container">
+            <input type="password" name="newPassword" id="resetPass" placeholder="Nenosiri Jipya" required>
+            <button type="button" class="eye-btn" onclick="togglePassword('resetPass', this)">👁️</button>
+          </div>
+          <div class="password-container">
+            <input type="password" name="confirmPassword" id="resetConfirmPass" placeholder="Rudia Nenosiri Jipya" required>
+            <button type="button" class="eye-btn" onclick="togglePassword('resetConfirmPass', this)">👁️</button>
+          </div>
+
+          <button type="submit" style="background:#28a745; color:white; border:none; padding:12px; width:100%; font-weight:bold; cursor:pointer; border-radius:4px; font-size:16px; margin-top:8px;">Hifadhi</button>
         </form>
       </div>
     </body>
@@ -1830,7 +1856,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Routes (Mobile Responsive)
+// Super Admin
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -2028,7 +2054,6 @@ app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
   res.redirect('/superadmin');
 });
 
-// Daily Cron Job for Subscriptions
 cron.schedule('0 8 * * *', async () => {
   try {
     if (!isWhatsappReady || !sock) return;
@@ -2050,7 +2075,6 @@ cron.schedule('0 8 * * *', async () => {
   } catch (err) { console.error('Cron error:', err); }
 });
 
-// Start Express Server & Initialize Baileys Bot
 app.listen(PORT, () => {
   console.log(`🌐 Server active on ${BASE_URL}`);
   connectToWhatsApp();
