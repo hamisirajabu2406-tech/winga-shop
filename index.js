@@ -788,7 +788,7 @@ app.post('/register', async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(password, 10);
     const expiry = new Date();
-    expiry.setDate(expiry.getDate() + 30); // Siku 30 za majaribio ya bure
+    expiry.setDate(expiry.getDate() + 30);
     await db('wingas').insert({
       name,
       phone,
@@ -819,7 +819,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga
+// Admin Dashboard for Winga (With Subscription Countdown & Chart.js Analytics)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -834,35 +834,50 @@ app.get('/admin', requireWinga, async (req, res) => {
       </div>
       `);
     }
+
     const currentWingaId = req.session.wingaId;
     const currentWingaName = req.session.wingaName;
     const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
-    // Hesabu siku zilizobaki za kifurushi (Subscription Countdown)
-let subscriptionBanner = '';
-if (currentWinga && currentWinga.expiryDate) {
-  const expiryDate = new Date(currentWinga.expiryDate);
-  const today = new Date();
-  const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-  const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', year: 'numeric' });
-
-  if (daysLeft <= 5) {
-    // Rangi nyekundu/njano ya tahadhari zikibaki siku 5 au chini
-    subscriptionBanner = `
-    <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-      <span>⚠️ <strong>Tahadhari ya Kifurushi:</strong> Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Lipia mapema kuepuka kusitishwa!</span>
-      <a href="https://wa.me/${botPhone}?text=Habari%20Admin,%20naomba%20kulipia%20kifurushi%20cha%20duka%20langu%20(${encodeURIComponent(currentWingaName)})" target="_blank" style="background: #856404; color: white; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Sasa</a>
-    </div>`;
-  } else {
-    // Rangi ya kijani ya kawaida siku zikiwa nyingi
-    subscriptionBanner = `
-    <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
-      ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>).
-    </div>`;
-  }
-}
     const products = await db('products').where({ wingaId: currentWingaId });
     const orders = await db('orders').where({ wingaId: currentWingaId });
     const reviews = await db('reviews').select('*');
+
+    // Hesabu siku zilizobaki za kifurushi (Subscription Countdown)
+    let subscriptionBanner = '';
+    if (currentWinga && currentWinga.expiryDate) {
+      const expiryDate = new Date(currentWinga.expiryDate);
+      const today = new Date();
+      const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+      const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', year: 'numeric' });
+
+      if (daysLeft <= 5) {
+        subscriptionBanner = `
+        <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <span>⚠️ <strong>Tahadhari ya Kifurushi:</strong> Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Lipia mapema kuepuka kusitishwa!</span>
+          <a href="https://wa.me/${botPhone}?text=Habari%20Admin,%20naomba%20kulipia%20kifurushi%20cha%20duka%20langu%20(${encodeURIComponent(currentWingaName)})" target="_blank" style="background: #856404; color: white; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Sasa</a>
+        </div>`;
+      } else {
+        subscriptionBanner = `
+        <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
+          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inაisha tarehe: <strong>${formattedExpiry}</strong>).
+        </div>`;
+      }
+    }
+
+    // Kuandaa Data za Chart.js Kutoka Kwenye Database Halisi
+    let salesByDate = {};
+    orders.forEach(o => {
+      if (o.status === 'Completed' && o.date) {
+        const dateStr = new Date(o.date).toISOString().split('T')[0];
+        const rev = Number(o.sellingPrice || o.price || 0);
+        salesByDate[dateStr] = (salesByDate[dateStr] || 0) + rev;
+      }
+    });
+    const chartLabels = Object.keys(salesByDate).sort().slice(-7);
+    const chartDataValues = chartLabels.map(date => salesByDate[date]);
+    const safeChartLabels = chartLabels.length > 0 ? JSON.stringify(chartLabels) : JSON.stringify(["Leo"]);
+    const safeChartData = chartDataValues.length > 0 ? JSON.stringify(chartDataValues) : JSON.stringify([0]);
+
     let totalRevenue = 0;
     let totalCost = 0;
     let completedOrdersCount = 0;
@@ -880,6 +895,7 @@ if (currentWinga && currentWinga.expiryDate) {
       }
     });
     const netProfit = totalRevenue - totalCost;
+
     let productRows = products.map(p => {
       const images = getProductImages(p);
       let productImgHtml = '📦';
@@ -982,6 +998,8 @@ if (currentWinga && currentWinga.expiryDate) {
     <head>
       <title>Winga Dashboard - ${escapeHtml(currentWingaName)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
+      <!-- Chart.js CDN Library -->
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f4f6f8; color: #333; }
         .container { max-width: 1100px; margin: 0 auto; }
@@ -1005,8 +1023,8 @@ if (currentWinga && currentWinga.expiryDate) {
     </head>
     <body>
       <div class="container">
-  ${alertMessage}
-  ${subscriptionBanner}
+        ${alertMessage}
+        ${subscriptionBanner}
         <div class="top-nav">
           <h1>🛍️ Winga Dashboard - ${escapeHtml(currentWingaName)}</h1>
           <div>
@@ -1052,6 +1070,46 @@ if (currentWinga && currentWinga.expiryDate) {
           <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
           <div class="stat-card"><h3>Net Profit Earned</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
+
+        <!-- Chart.js Analytics Section -->
+        <div class="card">
+          <h2>📊 Takwimu za Mauzo ya Hivi Karibuni (Analytics)</h2>
+          <div style="position: relative; height: 250px; width: 100%;">
+            <canvas id="salesAnalyticsChart"></canvas>
+          </div>
+        </div>
+        <script>
+          const ctx = document.getElementById('salesAnalyticsChart').getContext('2d');
+          const salesAnalyticsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: ${safeChartLabels},
+              datasets: [{
+                label: 'Mauzo (TSh)',
+                data: ${safeChartData},
+                backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                borderColor: 'rgba(40, 167, 69, 1)',
+                borderWidth: 2,
+                borderRadius: 6
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  ticks: {
+                    callback: function(value) {
+                      return 'TSh ' + value.toLocaleString();
+                    }
+                  }
+                }
+              }
+            }
+          });
+        </script>
+
         <div class="card">
           <h2>Add New Product (1 to 4 Photos)</h2>
           <form action="/admin/add" method="POST" enctype="multipart/form-data">
