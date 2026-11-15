@@ -10,11 +10,19 @@ const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const basicAuth = require('express-basic-auth');
+const cloudinary = require('cloudinary').v2;
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+// Configure Cloudinary using Environment Variables
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Global State Flags
 let sock = null;
@@ -32,14 +40,10 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
 // Middleware Setup & Proxy Trust for Render Cloud
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use('/uploads', express.static(UPLOADS_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Unified Session Middleware with Lax cookie settings to prevent login loops
@@ -61,26 +65,19 @@ app.use('/superadmin', basicAuth({
   challenge: true
 }));
 
-// Multer Restricted Storage Configuration (Strict MIME Type Filtering)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname))
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp|gif/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  if (extname && mimetype) {
-    return cb(null, true);
-  }
-  cb(new Error('Ruhusiwa kupakia picha pekee (jpeg, jpg, png, webp, gif)!'));
-};
-
+// Multer Memory Storage Configuration (Files are kept in RAM temporarily before uploading to Cloudinary)
 const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB Limit
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB Limit per file
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|webp|gif/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    }
+    cb(new Error('Ruhusiwa kupakia picha pekee (jpeg, jpg, png, webp, gif)!'));
+  }
 }).array('images', 4);
 
 // Authentication Guard Middleware
@@ -95,9 +92,6 @@ function requireWinga(req, res, next) {
 function getProductImages(product) {
   if (!product) return [];
   let raw = product.imageUrl;
-  if (!raw || (typeof raw === 'string' && raw.trim() === '')) {
-    raw = product.imageLocalPath;
-  }
   if (!raw) return [];
   let list = [];
   try {
@@ -109,11 +103,7 @@ function getProductImages(product) {
   return list.map(img => {
     if (!img) return '';
     img = String(img).trim();
-    if (img.startsWith('http://') || img.startsWith('https://')) return img;
-    if (img.startsWith('/uploads/')) return img;
-    if (img.startsWith('uploads/')) return '/' + img;
-    const baseName = path.basename(img);
-    return `/uploads/${baseName}`;
+    return img;
   }).filter(Boolean);
 }
 
@@ -267,7 +257,7 @@ async function connectToWhatsApp() {
   });
 }
 
-// Helper: Broadcast New Product Notification
+// Helper: Broadcast New Product Notification (Using Cloudinary URL)
 async function notifyShopCustomers(winga, newProduct) {
   try {
     if (!isWhatsappReady || !sock) return;
@@ -275,7 +265,6 @@ async function notifyShopCustomers(winga, newProduct) {
     const customerJids = [...new Set(shopOrders.map(o => o.senderJid).filter(Boolean))];
     if (customerJids.length === 0) return;
     const images = getProductImages(newProduct);
-    const firstImage = images[0] ? path.join(UPLOADS_DIR, path.basename(images[0])) : null;
         
     const alertMsg =
       `📢 *TAARIFA ZA BIDHAA MPYA!* 🛍️\n` +
@@ -288,9 +277,8 @@ async function notifyShopCustomers(winga, newProduct) {
       
     for (const jid of customerJids) {
       try {
-        if (firstImage && fs.existsSync(firstImage)) {
-          const mediaBuffer = fs.readFileSync(firstImage);
-          await sock.sendMessage(jid, { image: mediaBuffer, caption: alertMsg });
+        if (images.length > 0 && images[0]) {
+          await sock.sendMessage(jid, { image: { url: images[0] }, caption: alertMsg });
         } else {
           await sock.sendMessage(jid, { text: alertMsg });
         }
@@ -325,15 +313,9 @@ async function notifyWinga(order, product) {
       `📞 *Mteja Simu:* ${order.customerPhone}\n\n` +
       `📲 Angalia dashboard yako hapa: ${BASE_URL}/admin`;
       
-    let targetFilePath = null;
     const images = getProductImages(product);
-    if (images.length > 0) {
-      targetFilePath = path.join(UPLOADS_DIR, path.basename(images[0]));
-    }
-    
-    if (targetFilePath && fs.existsSync(targetFilePath)) {
-      const mediaBuffer = fs.readFileSync(targetFilePath);
-      await sock.sendMessage(wingaChatId, { image: mediaBuffer, caption: alertMessage });
+    if (images.length > 0 && images[0]) {
+      await sock.sendMessage(wingaChatId, { image: { url: images[0] }, caption: alertMessage });
     } else {
       await sock.sendMessage(wingaChatId, { text: alertMessage });
     }
@@ -754,7 +736,7 @@ app.post('/login', async (req, res) => {
       if (isPasswordValid) {
         req.session.wingaId = matchedWinga.id;
         req.session.wingaName = matchedWinga.name;
-        return res.redirect('/admin'); // 👈 Hapa lazima iwe res.redirect badala ya req.redirect
+        return res.redirect('/admin');
       }
     }
     res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
@@ -790,6 +772,7 @@ app.get('/admin', requireWinga, async (req, res) => {
     }
     const currentWingaId = req.session.wingaId;
     const currentWingaName = req.session.wingaName;
+    const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
     const products = await db('products').where({ wingaId: currentWingaId });
     const orders = await db('orders').where({ wingaId: currentWingaId });
     const reviews = await db('reviews').select('*');
@@ -901,7 +884,7 @@ app.get('/admin', requireWinga, async (req, res) => {
     } else if (req.query.error === 'upload') {
       alertMessage = `
       <div style="background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 12px 15px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-        <span>❌ Hitilafu ya kupakia: Ruhusiwa kupakia picha pekee (max 4 files, 5MB max each).</span>
+        <span>❌ Hitilafu ya kupakia picha kwenda Cloudinary. Jaribu tena.</span>
         <span onclick="this.parentElement.style.display='none'" style="cursor:pointer; font-size: 18px;">&times;</span>
       </div>`;
     }
@@ -910,7 +893,7 @@ app.get('/admin', requireWinga, async (req, res) => {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Winga Private Dashboard - ${escapeHtml(currentWingaName)}</title>
+      <title>Winga Dashboard - ${escapeHtml(currentWingaName)}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f4f6f8; color: #333; }
@@ -974,7 +957,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         </script>
         <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border: 1px solid #90caf9; margin-bottom: 20px;">
           <h3 style="margin-top: 0; color: #0d47a1;">🔗 Link Yako ya Duka</h3>
-          <input type="text" value="${BASE_URL}/catalog?shop=${currentWingaId}" readonly style="width: 100%; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white;">
+          <input type="text" value="${dynamicBaseUrl}/catalog?shop=${currentWingaId}" readonly style="width: 100%; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white;">
         </div>
         <div class="stats-grid">
           <div class="stat-card"><h3>Completed Orders</h3><p>${completedOrdersCount}</p></div>
@@ -1054,35 +1037,6 @@ app.get('/admin', requireWinga, async (req, res) => {
         function openModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imgModal').style.display = 'flex'; }
         function closeModal() { document.getElementById('imgModal').style.display = 'none'; }
       </script>
-      <div id="editModal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center;">
-        <div style="background: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 450px;">
-          <h3>✏️ Rekebisha Bidhaa</h3>
-          <form action="/admin/product/edit" method="POST">
-            <input type="hidden" id="editId" name="id">
-            <div style="margin-bottom: 8px;"><label>Jina:</label><input type="text" id="editName" name="name" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Kipengele:</label><input type="text" id="editCategory" name="category" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Bei ya Kununua:</label><input type="number" id="editBuyingPrice" name="buyingPrice" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 8px;"><label>Bei ya Kuuzia:</label><input type="number" id="editSellingPrice" name="sellingPrice" style="width:100%; padding:6px;" required></div>
-            <div style="margin-bottom: 12px;"><label>Saizi:</label><input type="text" id="editSize" name="size" style="width:100%; padding:6px;"></div>
-            <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button type="button" onclick="closeEditModal()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Aghana</button>
-              <button type="submit" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Hifadhi</button>
-            </div>
-          </form>
-        </div>
-      </div>
-      <script>
-        function handleEditClick(btn) {
-          document.getElementById('editId').value = btn.getAttribute('data-id');
-          document.getElementById('editName').value = btn.getAttribute('data-name');
-          document.getElementById('editCategory').value = btn.getAttribute('data-category');
-          document.getElementById('editBuyingPrice').value = btn.getAttribute('data-buying');
-          document.getElementById('editSellingPrice').value = btn.getAttribute('data-selling');
-          document.getElementById('editSize').value = btn.getAttribute('data-size');
-          document.getElementById('editModal').style.display = 'flex';
-        }
-        function closeEditModal() { document.getElementById('editModal').style.display = 'none'; }
-      </script>
     </body>
     </html>
     `);
@@ -1092,7 +1046,7 @@ app.get('/admin', requireWinga, async (req, res) => {
   }
 });
 
-// Admin Add Product Route
+// Admin Add Product Route (With Cloudinary Upload Integration)
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -1101,9 +1055,26 @@ app.post('/admin/add', requireWinga, (req, res) => {
     }
     try {
       const { name, category, buyingPrice, sellingPrice, size } = req.body;
-      const uploadedFiles = req.files || [];
-      const imageUrls = uploadedFiles.map(f => `/uploads/${f.filename}`);
-      const localPaths = uploadedFiles.map(f => f.path);
+      const files = req.files || [];
+      let imageUrls = [];
+
+      // Upload each file buffer directly to Cloudinary
+      for (const file of files) {
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: 'winga_shop_products' },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(file.buffer);
+        });
+        if (uploadResult && uploadResult.secure_url) {
+          imageUrls.push(uploadResult.secure_url);
+        }
+      }
+
       const [insertedId] = await db('products').insert({
         wingaId: req.session.wingaId,
         name: name.trim(),
@@ -1113,9 +1084,9 @@ app.post('/admin/add', requireWinga, (req, res) => {
         price: parseFloat(sellingPrice || 0),
         size: size ? size.trim() : 'Standard',
         imageUrl: JSON.stringify(imageUrls),
-        imageLocalPath: JSON.stringify(localPaths),
         dateAdded: new Date()
       });
+
       const newProduct = await db('products').where({ id: insertedId }).first();
       const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
             
@@ -1124,7 +1095,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
       }
       res.redirect('/admin?added=true');
     } catch (dbErr) {
-      console.error('DB Insert product error:', dbErr);
+      console.error('Cloudinary / DB Insert error:', dbErr);
       res.redirect('/admin?error=upload');
     }
   });
@@ -1319,7 +1290,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Routes
+// Super Admin Routes (Includes Add Winga feature)
 app.get('/superadmin', async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -1449,11 +1420,11 @@ app.get('/superadmin', async (req, res) => {
         </div>
         <div class="card">
           <h2>➕ Register a New Winga</h2>
-          <form action="/superadmin/add-winga" method="POST" style="display:flex; gap:10px;">
-            <input type="text" name="name" placeholder="Winga Name" required>
-            <input type="text" name="phone" placeholder="Phone" required>
-            <input type="password" name="password" placeholder="Password (def: 123456)">
-            <button type="submit">Register</button>
+          <form action="/superadmin/add-winga" method="POST" style="display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" name="name" placeholder="Winga Name" required style="flex:1; min-width:180px;">
+            <input type="text" name="phone" placeholder="Phone" required style="flex:1; min-width:140px;">
+            <input type="password" name="password" placeholder="Password (def: 123456)" style="flex:1; min-width:140px;">
+            <button type="submit">Register Winga</button>
           </form>
         </div>
         <div class="card">
