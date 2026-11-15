@@ -33,7 +33,7 @@ if (process.env.NODE_ENV === 'production') {
     console.error('❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!');
     process.exit(1);
   }
-  if (!process.env.SUPERADMIN_PASS || process.env.SUPERADMIN_PASS === 'SuperSecurePass123!') {
+  if (!process.env.SUPERADMIN_PASS || process.env.SUPERADMIN_PASS === 'WingaAdminPass2026!') {
     console.error('❌ FATAL ERROR: SUPERADMIN_PASS must be explicitly set to a secure password in production!');
     process.exit(1);
   }
@@ -58,9 +58,9 @@ app.use(session({
   }
 }));
 
-// Basic Auth Middleware for Superadmin Area
+// Basic Auth Middleware for Superadmin Area (Updated to WingaAdminPass2026!)
 app.use('/superadmin', basicAuth({
-  users: { 'admin': process.env.SUPERADMIN_PASS || 'SuperSecurePass123!' },
+  users: { 'admin': process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!' },
   challenge: true
 }));
 
@@ -819,7 +819,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard for Winga (With Subscription Countdown, Chart.js Analytics & Invoice Download)
+// Admin Dashboard for Winga (With Subscription Countdown, Chart.js Analytics, Invoice Download & Subscription Payment)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -830,7 +830,9 @@ app.get('/admin', requireWinga, async (req, res) => {
         <h1 style="color: #dc3545;">⚠️ Akaunti Imesitishwa</h1>
         <p>Muda wako wa malipo umekwisha. Hauruhusiwi kuingiza bidhaa mpya au kuona oda zako.</p>
         <p>Wasiliana na Admin (${botPhone}) kufanya malipo ili kufunguliwa.</p>
-        <a href="/logout" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">Rudi Kwenye Login</a>
+        <a href="/admin/pay-subscription" style="display:inline-block; margin-top:10px; padding:10px 20px; background:#28a745; color:white; text-decoration:none; border-radius:5px; font-weight:bold;">💳 Lipia Siku 30 Hapa</a>
+        <br>
+        <a href="/logout" style="display:inline-block; margin-top:20px; padding:8px 16px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">Rudi Kwenye Login</a>
       </div>
       `);
     }
@@ -854,12 +856,13 @@ app.get('/admin', requireWinga, async (req, res) => {
         subscriptionBanner = `
         <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
           <span>⚠️ <strong>Tahadhari ya Kifurushi:</strong> Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Lipia mapema kuepuka kusitishwa!</span>
-          <a href="https://wa.me/${botPhone}?text=Habari%20Admin,%20naomba%20kulipia%20kifurushi%20cha%20duka%20langu%20(${encodeURIComponent(currentWingaName)})" target="_blank" style="background: #856404; color: white; padding: 6px 12px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Sasa</a>
+          <a href="/admin/pay-subscription" style="background: #28a745; color: white; padding: 6px 14px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: bold;">💳 Lipia Siku 30 Sasa</a>
         </div>`;
       } else {
         subscriptionBanner = `
         <div style="background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
-          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>).
+          ⏳ <strong>Muda wa Akaunti:</strong> Umebakisha <strong>siku ${daysLeft}</strong> za matumizi (Inaisha tarehe: <strong>${formattedExpiry}</strong>). 
+          <a href="/admin/pay-subscription" style="margin-left: 10px; color: #007bff; font-weight: bold; text-decoration: underline;">Ongeza Siku</a>
         </div>`;
       }
     }
@@ -1249,6 +1252,118 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   } catch (err) {
     console.error('Invoice generation error:', err);
     res.status(500).send('Hitilafu kwenye mfumo wa risiti.');
+  }
+});
+
+// Routes za Malipo ya Kifurushi (Subscription Mobile Money / Lipa Namba Simulation)
+app.get('/admin/pay-subscription', requireWinga, async (req, res) => {
+  try {
+    const winga = await db('wingas').where({ id: req.session.wingaId }).first();
+    if (!winga) return res.redirect('/login');
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="sw">
+    <head>
+      <meta charset="UTF-8">
+      <title>Lipia Kifurushi - Winga Shop</title>
+      <style>
+        body { font-family: sans-serif; background: #f4f6f8; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 360px; }
+        input, select { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
+        .back { display: block; margin-top: 15px; color: #007bff; text-decoration: none; font-size: 14px; }
+        .info-box { background: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: left; }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h2>💳 Lipia Siku 30 (TSh 5,000)</h2>
+        <div class="info-box">
+          <strong>Maelezo ya Lipa Namba:</strong><br>
+          Unaweza kulipa kupitia <em>Mix by Yas, M-Pesa, au Tigo Pesa</em> kwenda Namba ya Biashara / Lipa Namba yetu au kuweka namba yako hapa chini kufanya malipo ya moja kwa moja.
+        </div>
+        <form action="/admin/process-payment" method="POST">
+          <label style="display:block; text-align:left; font-size:12px; font-weight:bold;">Chagua Mtandao:</label>
+          <select name="network" required>
+            <option value="MixByYas">Mix by Yas</option>
+            <option value="M-Pesa">Vodacom M-Pesa</option>
+            <option value="TigoPesa">Tigo Pesa</option>
+            <option value="AirtelMoney">Airtel Money</option>
+          </select>
+          <label style="display:block; text-align:left; font-size:12px; font-weight:bold; margin-top:8px;">Namba ya Simu ya Malipo:</label>
+          <input type="text" name="phone" value="${escapeHtml(winga.phone)}" placeholder="07xxxxxxxx" required>
+          <button type="submit">Thibitisha na Lipa Sasa</button>
+        </form>
+        <a href="/admin" class="back">← Rudi Kwenye Dashboard</a>
+      </div>
+    </body>
+    </html>
+    `);
+  } catch (err) {
+    console.error('Payment page error:', err);
+    res.status(500).send('Hitilafu kwenye mfumo wa malipo.');
+  }
+});
+
+app.post('/admin/process-payment', requireWinga, async (req, res) => {
+  try {
+    const wingaId = req.session.wingaId;
+    const winga = await db('wingas').where({ id: wingaId }).first();
+    if (!winga) return res.redirect('/login');
+
+    const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
+    baseDate.setDate(baseDate.getDate() + 30); // Ongeza siku 30
+
+    await db('wingas').where({ id: wingaId }).update({
+      expiryDate: baseDate,
+      status: 'active'
+    });
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="sw">
+    <head>
+      <meta charset="UTF-8">
+      <title>Malipo Yamethibitishwa</title>
+      <style>
+        body { font-family: sans-serif; background: #e8f5e9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 350px; }
+        a { background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h2 style="color: #2e7d32;">🎉 Malipo Yamefanikiwa!</h2>
+        <p>Akaunti yako imeongezewa siku 30 mpaka tarehe <strong>${baseDate.toLocaleDateString('sw-TZ')}</strong>.</p>
+        <a href="/admin">Rudi Kwenye Dashboard</a>
+      </div>
+    </body>
+    </html>
+    `);
+  } catch (err) {
+    console.error('Process payment error:', err);
+    res.status(500).send('Hitilafu wakati wa kuchakata malipo.');
+  }
+});
+
+// Webhook endpoint ya kupokea ujumbe kutoka kwa Payment Gateway ya nje (Kama AzamPay / PesaPal)
+app.post('/api/payment/webhook', async (req, res) => {
+  try {
+    const { phone, status } = req.body;
+    if (status === 'SUCCESS' || status === 'completed') {
+      const winga = await db('wingas').where({ phone }).first();
+      if (winga) {
+        const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
+        baseDate.setDate(baseDate.getDate() + 30);
+        await db('wingas').where({ id: winga.id }).update({ expiryDate: baseDate, status: 'active' });
+        return res.status(200).json({ success: true, message: 'Subscription extended successfully.' });
+      }
+    }
+    return res.status(400).json({ success: false, message: 'Invalid payment status or phone.' });
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
