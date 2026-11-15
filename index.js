@@ -351,7 +351,7 @@ app.get('/catalog', async (req, res) => {
     const categories = [...new Set(allProducts.map(p => (p.category || 'General').trim()))];
         
     let categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
-    let shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId == w.id ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('');
+    let shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId == w.id ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
     let productCards = products.map(p => {
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
       const priceFormatted = sellingPrice > 0 ? sellingPrice.toLocaleString() : 'Haikutajwa';
@@ -362,6 +362,7 @@ app.get('/catalog', async (req, res) => {
       const categoryStr = (p.category || 'General').trim();
       const matchedWinga = wingas.find(w => w.id === p.wingaId);
       const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
+      const sellerLocation = matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
       let galleryThumbnailsHtml = '';
       if (imageList.length > 1) {
         galleryThumbnailsHtml = `<div style="display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 4px;">` +
@@ -386,6 +387,7 @@ app.get('/catalog', async (req, res) => {
         </div>
         <div style="font-size: 13px; color: #555; margin-bottom: 8px;">
           <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
+          <span>📍 <em>${escapeHtml(sellerLocation)}</em></span>
         </div>
         <button
           data-id="${p.id}"
@@ -743,28 +745,85 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Self-Registration Routes
+// Winga Self-Registration Routes (With Region, District & Ward selectors)
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
-  <html>
+  <html lang="sw">
   <head>
+    <meta charset="UTF-8">
     <title>Jisajili kama Muuzaji - Winga Shop</title>
     <style>
-      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 320px; }
-      input { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 340px; }
+      input, select { padding: 10px; width: 100%; margin: 6px 0 12px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+      label { display: block; text-align: left; font-size: 12px; font-weight: bold; color: #333; }
       button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
-      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 15px; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; text-align: center; margin-top: 15px; }
     </style>
+    <script>
+      const districtsData = {
+        "Dar es Salaam": ["Kinondoni", "Ilala", "Temeke", "Ubungo", "Kigamboni"],
+        "Arusha": ["Arusha Mjini", "Arumeru", "Karatu", "Longido", "Ngorongoro"],
+        "Dodoma": ["Dodoma Mjini", "Bahi", "Chamwino", "Chemba", "Kondoa", "Kongwa", "Mpwapwa"],
+        "Mwanza": ["Ilemela", "Nyamagana", "Magu", "Misungwi", "Sengerema", "Ukerewe", "Kwimba"],
+        "Mbeya": ["Mbeya Mjini", "Mbeya Vijijini", "Rungwe", "Kyela", "Mbozi", "Chunya"],
+        "Kilimanjaro": ["Moshi Mjini", "Moshi Vijijini", "Hai", "Rombo", "Mwanga", "Same", "Siha"],
+        "Tanga": ["Tanga Mjini", "Muheza", "Korogwe", "Handeni", "Pangani", "Lushoto", "Kilindi"],
+        "Morogoro": ["Morogoro Mjini", "Morogoro Vijijini", "Kilombero", "Kilosa", "Ulanga", "Gairo", "Malinyi"]
+      };
+
+      function updateDistricts() {
+        const regionSelect = document.getElementById("regionSelect");
+        const districtSelect = document.getElementById("districtSelect");
+        const selectedRegion = regionSelect.value;
+
+        districtSelect.innerHTML = '<option value="">-- Chagua Wilaya --</option>';
+        if (selectedRegion && districtsData[selectedRegion]) {
+          districtsData[selectedRegion].forEach(district => {
+            const opt = document.createElement("option");
+            opt.value = district;
+            opt.textContent = district;
+            districtSelect.appendChild(opt);
+          });
+        }
+      }
+    </script>
   </head>
   <body>
     <div class="box">
-      <h2>📝 Usajili wa Muuzaji</h2>
+      <h2 style="text-align:center; margin-top:0;">📝 Usajili wa Muuzaji</h2>
       <form action="/register" method="POST">
-        <input type="text" name="name" placeholder="Jina la Duka / Lako" required>
-        <input type="text" name="phone" placeholder="Namba ya Simu (WhatsApp)" required>
-        <input type="password" name="password" placeholder="Weka Nenosiri (Password)" required>
+        <label>Jina la Duka / Lako:</label>
+        <input type="text" name="name" placeholder="Mf: Boss Store" required>
+
+        <label>Namba ya Simu (WhatsApp):</label>
+        <input type="text" name="phone" placeholder="0712345678" required>
+
+        <label>Chagua Mkoa:</label>
+        <select name="region" id="regionSelect" onchange="updateDistricts()" required>
+          <option value="">-- Chagua Mkoa --</option>
+          <option value="Dar es Salaam">Dar es Salaam</option>
+          <option value="Arusha">Arusha</option>
+          <option value="Dodoma">Dodoma</option>
+          <option value="Mwanza">Mwanza</option>
+          <option value="Mbeya">Mbeya</option>
+          <option value="Kilimanjaro">Kilimanjaro</option>
+          <option value="Tanga">Tanga</option>
+          <option value="Morogoro">Morogoro</option>
+        </select>
+
+        <label>Chagua Wilaya:</label>
+        <select name="district" id="districtSelect" required>
+          <option value="">-- Kwanza Chagua Mkoa --</option>
+        </select>
+
+        <label>Kata / Mtaa:</label>
+        <input type="text" name="ward" placeholder="Mf: Kariakoo, Msimbazi" required>
+
+        <label>Weka Nenosiri (Password):</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+
         <button type="submit">Jisajili Sasa</button>
       </form>
       <a href="/login">← Tayari una akaunti? Ingia hapa</a>
@@ -778,29 +837,37 @@ app.post('/register', async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
     const phone = (req.body.phone || '').trim();
+    const region = (req.body.region || '').trim();
+    const district = (req.body.district || '').trim();
+    const ward = (req.body.ward || '').trim();
     const password = (req.body.password || '').trim();
-    if (!name || !phone || !password) {
-      return res.send('❌ Tafadhali jaza taarifa zote. <br><a href="/register">Jaribu Tena</a>');
+    
+    if (!name || !phone || !region || !district || !ward || !password) {
+      return res.send('❌ Tafadhali jaza taarifa zote na eneo vizuri. <br><a href="/register">Jaribu Tena</a>');
     }
     const existing = await db('wingas').where({ phone }).first();
     if (existing) {
       return res.send('❌ Namba hii ya simu tayari imesajiliwa! <br><a href="/login">Ingia Hapa</a>');
     }
+    const fullLocation = `${ward}, ${district}, ${region}`;
     const hashedPassword = await bcrypt.hash(password, 10);
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + 30);
+    
     await db('wingas').insert({
       name,
       phone,
+      location: fullLocation,
       password: hashedPassword,
       status: 'active',
       expiryDate: expiry,
       dateAdded: new Date()
     });
+    
     res.send(`
     <div style="text-align:center; padding:50px; font-family:sans-serif;">
       <h2 style="color:#28a745;">🎉 Usajili Umefanikiwa!</h2>
-      <p>Akaunti yako ya duka imetengenezwa kikamilifu.</p>
+      <p>Akaunti yako ya duka yenye eneo la <strong>${escapeHtml(fullLocation)}</strong> imetengenezwa kikamilifu.</p>
       <a href="/login" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px; display:inline-block; margin-top:15px;">Ingia Kwenye Dashboard Yako</a>
     </div>
     `);
@@ -924,15 +991,6 @@ app.get('/admin', requireWinga, async (req, res) => {
         <td>${escapeHtml(p.size || 'Standard')}</td>
         <td>
           <div style="display: flex; gap: 4px;">
-            <button type="button"
-              data-id="${p.id}"
-              data-name="${safeName}"
-              data-category="${safeCategory}"
-              data-buying="${buyingPrice}"
-              data-selling="${sellingPrice}"
-              data-size="${safeSize}"
-              onclick="handleEditClick(this)"
-              style="background:#ffc107; color:#000; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✏️ Edit</button>
             <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
               <input type="hidden" name="id" value="${p.id}">
               <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
@@ -1644,7 +1702,7 @@ app.get('/superadmin', async (req, res) => {
       return `
       <tr>
         <td><strong>#${w.id}</strong></td>
-        <td>${escapeHtml(w.name)}</td>
+        <td>${escapeHtml(w.name)}<br><small style="color:#666;">📍 ${escapeHtml(w.location || 'N/A')}</small></td>
         <td>${escapeHtml(w.phone)}</td>
         <td>${statusBadge}</td>
         <td>${expiryFormatted}</td>
@@ -1739,18 +1797,9 @@ app.get('/superadmin', async (req, res) => {
           <div class="stat-card"><h3>Total Profit</h3><p>TSh ${platformTotalProfit.toLocaleString()}</p></div>
         </div>
         <div class="card">
-          <h2>➕ Register a New Winga</h2>
-          <form action="/superadmin/add-winga" method="POST" style="display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" name="name" placeholder="Winga Name" required style="flex:1; min-width:180px;">
-            <input type="text" name="phone" placeholder="Phone" required style="flex:1; min-width:140px;">
-            <input type="password" name="password" placeholder="Password (def: 123456)" style="flex:1; min-width:140px;">
-            <button type="submit">Register Winga</button>
-          </form>
-        </div>
-        <div class="card">
           <h2>🏢 Wingas Directory</h2>
           <table>
-            <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
+            <thead><tr><th>ID</th><th>Name & Location</th><th>Phone</th><th>Status</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
             <tbody>${wingaRows || '<tr><td colspan="9">No wingas registered.</td></tr>'}</tbody>
           </table>
         </div>
@@ -1780,20 +1829,6 @@ app.get('/superadmin', async (req, res) => {
 app.post('/superadmin/product/delete', async (req, res) => {
   try {
     await db('products').where({ id: parseInt(req.body.id) }).del();
-  } catch (err) {}
-  res.redirect('/superadmin');
-});
-
-app.post('/superadmin/add-winga', async (req, res) => {
-  try {
-    const name = (req.body.name || '').trim();
-    const phone = (req.body.phone || '').trim();
-    const rawPassword = (req.body.password || '123456').trim();
-    if (!name || !phone) return res.redirect('/superadmin');
-    const hashedPassword = await bcrypt.hash(rawPassword, 10);
-    const expiry = new Date();
-    expiry.setDate(expiry.getDate() + 30);
-    await db('wingas').insert({ name, phone, password: hashedPassword, status: 'active', expiryDate: expiry, dateAdded: new Date() });
   } catch (err) {}
   res.redirect('/superadmin');
 });
