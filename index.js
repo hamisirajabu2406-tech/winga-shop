@@ -1203,6 +1203,8 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
     if (!order) return res.send('❌ Oda haipatikani au sio ya duka lako.');
     
     const winga = await db('wingas').where({ id: req.session.wingaId }).first();
+    const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const shopLink = `${dynamicBaseUrl}/catalog?shop=${winga.id}`;
 
     res.send(`
     <!DOCTYPE html>
@@ -1214,6 +1216,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
         body { font-family: monospace; background: #fff; color: #000; padding: 30px; max-width: 420px; margin: 0 auto; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 30px; border-radius: 8px; }
         .center { text-align: center; }
         hr { border: dashed 1px #888; }
+        a { color: #007bff; text-decoration: none; }
         .btn-print { background: #007bff; color: white; border: none; padding: 12px 20px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 20px; border-radius: 6px; font-size: 15px; }
         @media print { 
           body { border: none; box-shadow: none; padding: 0; margin: 0; max-width: 100%; }
@@ -1225,6 +1228,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
       <div class="center">
         <h2>🛍️ ${escapeHtml(winga.name)}</h2>
         <p>Simu: ${escapeHtml(winga.phone)}</p>
+        <p style="font-size: 12px; word-break: break-all;">Link ya Duka:<br><a href="${shopLink}" target="_blank">${shopLink}</a></p>
         <hr>
         <h3>RISITI YA MAUZO (INVOICE)</h3>
       </div>
