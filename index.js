@@ -4,7 +4,6 @@ const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
-const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const multer = require('multer');
@@ -65,7 +64,7 @@ app.use('/superadmin', basicAuth({
   challenge: true
 }));
 
-// Multer Memory Storage Configuration (Files are kept in RAM temporarily before uploading to Cloudinary)
+// Multer Memory Storage Configuration (Files kept in RAM temporarily before uploading to Cloudinary)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB Limit per file
@@ -102,8 +101,7 @@ function getProductImages(product) {
   }
   return list.map(img => {
     if (!img) return '';
-    img = String(img).trim();
-    return img;
+    return String(img).trim();
   }).filter(Boolean);
 }
 
@@ -689,7 +687,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Winga Login Routes
+// Winga Login Routes (With Register Link)
 app.get('/login', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -701,7 +699,7 @@ app.get('/login', (req, res) => {
       .login-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 300px; }
       input { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
       button { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; font-weight: bold; }
-      a { color: #007bff; text-decoration: none; font-size: 13px; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 8px; }
     </style>
   </head>
   <body>
@@ -714,9 +712,8 @@ app.get('/login', (req, res) => {
         <input type="password" name="password" placeholder="••••••••" required>
         <button type="submit">Ingia Dashboard</button>
       </form>
-      <p style="margin-top: 15px;">
-        <a href="/forgot-password">🔑 Umesahau Nenosiri?</a>
-      </p>
+      <a href="/forgot-password">🔑 Umesahau Nenosiri?</a>
+      <a href="/register" style="color: #28a745; font-weight: bold;">📝 Jisajili kama Muuzaji Mpya</a>
     </div>
   </body>
   </html>
@@ -743,6 +740,73 @@ app.post('/login', async (req, res) => {
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).send('Hitilafu ya Server.');
+  }
+});
+
+// Winga Self-Registration Routes
+app.get('/register', (req, res) => {
+  res.send(`
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Jisajili kama Muuzaji - Winga Shop</title>
+    <style>
+      body { font-family: sans-serif; background: rgb(106, 136, 232); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+      .box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 320px; }
+      input { padding: 10px; width: 100%; margin: 8px 0; border: 1px solid #4092e5; border-radius: 4px; box-sizing: border-box; }
+      button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
+      a { color: #007bff; text-decoration: none; font-size: 13px; display: block; margin-top: 15px; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h2>📝 Usajili wa Muuzaji</h2>
+      <form action="/register" method="POST">
+        <input type="text" name="name" placeholder="Jina la Duka / Lako" required>
+        <input type="text" name="phone" placeholder="Namba ya Simu (WhatsApp)" required>
+        <input type="password" name="password" placeholder="Weka Nenosiri (Password)" required>
+        <button type="submit">Jisajili Sasa</button>
+      </form>
+      <a href="/login">← Tayari una akaunti? Ingia hapa</a>
+    </div>
+  </body>
+  </html>
+  `);
+});
+
+app.post('/register', async (req, res) => {
+  try {
+    const name = (req.body.name || '').trim();
+    const phone = (req.body.phone || '').trim();
+    const password = (req.body.password || '').trim();
+    if (!name || !phone || !password) {
+      return res.send('❌ Tafadhali jaza taarifa zote. <br><a href="/register">Jaribu Tena</a>');
+    }
+    const existing = await db('wingas').where({ phone }).first();
+    if (existing) {
+      return res.send('❌ Namba hii ya simu tayari imesajiliwa! <br><a href="/login">Ingia Hapa</a>');
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + 30); // Siku 30 za majaribio ya bure
+    await db('wingas').insert({
+      name,
+      phone,
+      password: hashedPassword,
+      status: 'active',
+      expiryDate: expiry,
+      dateAdded: new Date()
+    });
+    res.send(`
+    <div style="text-align:center; padding:50px; font-family:sans-serif;">
+      <h2 style="color:#28a745;">🎉 Usajili Umefanikiwa!</h2>
+      <p>Akaunti yako ya duka imetengenezwa kikamilifu.</p>
+      <a href="/login" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px; display:inline-block; margin-top:15px;">Ingia Kwenye Dashboard Yako</a>
+    </div>
+    `);
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).send('Hitilafu ya Server wakati wa kusajili.');
   }
 });
 
@@ -1058,7 +1122,6 @@ app.post('/admin/add', requireWinga, (req, res) => {
       const files = req.files || [];
       let imageUrls = [];
 
-      // Upload each file buffer directly to Cloudinary
       for (const file of files) {
         const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
@@ -1290,7 +1353,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Routes (Includes Add Winga feature)
+// Super Admin Routes
 app.get('/superadmin', async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
