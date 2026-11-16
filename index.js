@@ -5,6 +5,7 @@ const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
+const fs = require('fs');
 const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
@@ -13,7 +14,7 @@ const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const PUBLIC_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://winga-shop.onrender.com').replace(/\/$/, '');
 
 // Configure Cloudinary using Environment Variables
 cloudinary.config({
@@ -42,6 +43,21 @@ if (process.env.NODE_ENV === 'production') {
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// Landing Page (Inaondoa Admin Portal / Superadmin link kabisa kabla ya ku-serve)
+app.get(['/', '/index.html'], (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, html) => {
+    if (err) {
+      return res.redirect('/catalog');
+    }
+    const cleanedHtml = html
+      .replace(/<a[^>]*href=["'][^"']*\/(login|admin|superadmin)[^"']*["'][^>]*>[\s\S]*?<\/a>/gi, '')
+      .replace(/<a[^>]*>[^<]*Admin\s*Portal[^<]*<\/a>/gi, '');
+    res.send(cleanedHtml);
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Unified Session Middleware
@@ -263,7 +279,7 @@ async function connectToWhatsApp() {
         };
         await db('orders').insert(newOrder);
 
-        const trackUrl = `${BASE_URL}/track?id=${newOrder.orderId}`;
+        const trackUrl = `${PUBLIC_URL}/track?id=${newOrder.orderId}`;
         await sock.sendMessage(remoteJid, {
           text: `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
                 `🔖 *Oda:* #${newOrder.orderId}\n` +
@@ -280,7 +296,7 @@ async function connectToWhatsApp() {
 
       const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
       if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
-        await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${BASE_URL}/catalog` });
+        await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${PUBLIC_URL}/catalog` });
         continue;
       }
     }
@@ -302,7 +318,7 @@ async function notifyShopCustomers(winga, newProduct) {
       `📦 *Bidhaa:* ${newProduct.name}\n` +
       `💰 *Bei:* TSh ${Number(newProduct.sellingPrice).toLocaleString()}\n` +
       `📁 *Aina:* ${newProduct.category}\n\n` +
-      `🔗 *Tazama na uagize hapa:*\n${BASE_URL}/catalog?shop=${winga.id}`;
+      `🔗 *Tazama na uagize hapa:*\n${PUBLIC_URL}/catalog?shop=${winga.id}`;
 
     for (const jid of customerJids) {
       try {
@@ -339,7 +355,7 @@ async function notifyWinga(order, product) {
       `💵 *Faida Yako (Profit):* TSh ${(order.sellingPrice - order.buyingPrice).toLocaleString()}\n` +
       `📍 *Eneo la Mteja:* ${order.location}\n` +
       `📞 *Mteja Simu:* ${order.customerPhone}\n\n` +
-      `📲 Angalia dashboard yako hapa: ${BASE_URL}/admin`;
+      `📲 Angalia dashboard yako hapa: ${PUBLIC_URL}/admin`;
 
     const images = getProductImages(product);
     if (images.length > 0 && images[0]) {
@@ -351,11 +367,6 @@ async function notifyWinga(order, product) {
     console.error('❌ Failed to send alert to Winga:', err);
   }
 }
-
-// Landing Page (Haina tena Admin Login Link)
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 app.get('/catalog', async (req, res) => {
   try {
@@ -901,7 +912,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Unified Login Page (Ina Eye Icon ya Password)
+// Unified Login Page
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -991,7 +1002,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Winga Self-Registration (Ina Eye Icon ya Password)
+// Winga Self-Registration
 app.get('/register', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -1150,7 +1161,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard (Haina tena Sales Graph, Ina Eye Icons kwenye Change Password)
+// Admin Dashboard
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1189,7 +1200,6 @@ app.get('/admin', requireWinga, async (req, res) => {
 
     const currentWingaId = req.session.wingaId;
     const currentWingaName = req.session.wingaName;
-    const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
     const products = await db('products').where({ wingaId: currentWingaId });
     const orders = await db('orders').where({ wingaId: currentWingaId });
     const reviews = await db('reviews').select('*');
@@ -1234,7 +1244,7 @@ app.get('/admin', requireWinga, async (req, res) => {
     });
     const netProfit = totalRevenue - totalCost;
 
-    const shopUrl = `${dynamicBaseUrl}/catalog?shop=${currentWingaId}`;
+    const shopUrl = `${PUBLIC_URL}/catalog?shop=${currentWingaId}`;
     const shareWhatsAppText = encodeURIComponent(`Habari! Karibu utazame bidhaa na uagize kupitia duka langu hapa:\n${shopUrl}`);
 
     let productRows = products.map(p => {
@@ -1555,8 +1565,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
     if (!order) return res.send('❌ Oda haipatikani au sio ya duka lako.');
 
     const winga = await db('wingas').where({ id: req.session.wingaId }).first();
-    const dynamicBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const shopLink = `${dynamicBaseUrl}/catalog?shop=${winga.id}`;
+    const shopLink = `${PUBLIC_URL}/catalog?shop=${winga.id}`;
 
     res.send(`
     <!DOCTYPE html>
@@ -1682,7 +1691,7 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
       }
       if (customerChatId && isWhatsappReady && sock) {
         let statusMessage = '';
-        const trackUrl = `${BASE_URL}/track?id=${order.orderId}`;
+        const trackUrl = `${PUBLIC_URL}/track?id=${order.orderId}`;
         if (status === 'Dispatched') {
           statusMessage =
             `🚚 *TAARIFA ZA ODA - DISPATCHED!* 🚚\n` +
@@ -1695,7 +1704,9 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
             `✅ *ODA YAKO IMEMALIZIKA!* 🎉\n` +
             `-----------------------------------\n` +
             `Habari! Oda #${order.orderId} (${order.productName}) imewasilishwa.\n\n` +
-            `⭐ *TOA MAONI YAKO:* ⭐\n` +
+            `⭐ *TOA MAONI & NYOTA HAPA:* ⭐\n` +
+            `Bonyeza link hii kutoa feedback moja kwa moja:\n${trackUrl}\n\n` +
+            `Au tuma ujumbe hapa WhatsApp:\n` +
             `*!maoni ${order.orderId} [nyota 1-5] [maoni yako]*`;
         }
         if (statusMessage) {
@@ -1734,7 +1745,7 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password (Ina Eye Icon)
+// Forgot & Reset Password
 app.get('/forgot-password', (req, res) => {
   res.send(`
   <!DOCTYPE html>
@@ -2076,6 +2087,6 @@ cron.schedule('0 8 * * *', async () => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🌐 Server active on ${BASE_URL}`);
+  console.log(`🌐 Server active on ${PUBLIC_URL}`);
   connectToWhatsApp();
 });
