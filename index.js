@@ -33,10 +33,6 @@ if (process.env.NODE_ENV === 'production') {
     console.error('❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!');
     process.exit(1);
   }
-  if (!process.env.SUPERADMIN_PASS || process.env.SUPERADMIN_PASS === 'SuperSecurePass123!') {
-    console.error('❌ FATAL ERROR: SUPERADMIN_PASS must be explicitly set to a secure password in production!');
-    process.exit(1);
-  }
 }
 
 // Middleware Setup & Proxy Trust for Render Cloud
@@ -44,17 +40,14 @@ app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Landing Page (Inaondoa Admin Portal / Superadmin link kabisa kabla ya ku-serve)
+// Landing Page
 app.get(['/', '/index.html'], (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   fs.readFile(indexPath, 'utf8', (err, html) => {
     if (err) {
       return res.redirect('/catalog');
     }
-    const cleanedHtml = html
-      .replace(/<a[^>]*href=["'][^"']*\/(login|admin|superadmin)[^"']*["'][^>]*>[\s\S]*?<\/a>/gi, '')
-      .replace(/<a[^>]*>[^<]*Admin\s*Portal[^<]*<\/a>/gi, '');
-    res.send(cleanedHtml);
+    res.send(html);
   });
 });
 
@@ -368,6 +361,7 @@ async function notifyWinga(order, product) {
   }
 }
 
+// Public Catalog Route
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -783,6 +777,7 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
+// Track Route
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -912,7 +907,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Unified Login Page
+// Unified Login Page (Supports Both Sellers and Superadmins via Phone Number)
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -979,8 +974,14 @@ app.post('/login', async (req, res) => {
       return res.send('❌ Tafadhali jaza taarifa za kuingia. <br><a href="/login">Jaribu Tena</a>');
     }
 
-    const superAdminPass = process.env.SUPERADMIN_PASS || 'WingaAdminPass2026!';
-    if (identifier.toLowerCase() === 'admin' && password === superAdminPass) {
+    // Superadmin Wawili (Configured via Environment Variables)
+    const superAdminPhone1 = process.env.SUPERADMIN_PHONE_1 || '0678143403';
+    const superAdminPass1 = process.env.SUPERADMIN_PASS_1 || 'SuperSecurePass2026!';
+    const superAdminPhone2 = process.env.SUPERADMIN_PHONE_2 || '0745423403';
+    const superAdminPass2 = process.env.SUPERADMIN_PASS_2 || 'WingaAdminPass2026!';
+
+    if ((identifier === superAdminPhone1 && password === superAdminPass1) || 
+        (identifier === superAdminPhone2 && password === superAdminPass2)) {
       req.session.isSuperAdmin = true;
       return res.redirect('/superadmin');
     }
@@ -1867,7 +1868,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin
+// Super Admin Dashboard
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -1935,7 +1936,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
       const matchedWinga = wingas.find(w => w.id === p.wingaId);
       const sellerName = matchedWinga ? matchedWinga.name : `Winga #${p.wingaId}`;
       const images = getProductImages(p);
-      const mainImg = images[0] ? `<img src="${images[0]}" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px;">` : '📦';
+      const mainImg = images[0] ? `<img src="${images[0]}" onclick="openModal('${images[0]}')" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; cursor: pointer;" title="Bonyeza kukuza">` : '📦';
       return `
       <tr class="super-prod-row">
         <td><strong>#${p.id}</strong></td>
@@ -1986,6 +1987,10 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
           body { padding: 20px; }
           .card { padding: 20px; }
         }
+        .form-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+        @media(min-width: 600px) { .form-row { grid-template-columns: 1fr 1fr 1fr auto; } }
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-size: 14px; }
+        button.btn-main { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; }
         .table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 600px; font-size: 13px; }
         th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; white-space: nowrap; }
@@ -1998,11 +2003,25 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
       <div class="container">
         <h1>👑 Platform Super Admin</h1>
         <a href="/logout" style="background: #ec0c22; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; margin-bottom: 15px;">🚪 Logout</a>
+        
         <div class="stats-grid">
           <div class="stat-card"><h3>Total Wingas</h3><p style="color:white;">${wingas.length}</p></div>
           <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${platformTotalRevenue.toLocaleString()}</p></div>
           <div class="stat-card"><h3>Total Profit</h3><p>TSh ${platformTotalProfit.toLocaleString()}</p></div>
         </div>
+
+        <div class="card">
+          <h2>➕ Ongeza Muuzaji Mpya (Register Winga)</h2>
+          <form action="/superadmin/add-winga" method="POST">
+            <div class="form-row">
+              <input type="text" name="name" placeholder="Jina la Duka / Muuzaji" required>
+              <input type="tel" name="phone" placeholder="Namba ya Simu (07...)" maxlength="10" required>
+              <input type="password" name="password" placeholder="Password ya Muda (Default: 123456)">
+              <button type="submit" class="btn-main">Sajili Muuzaji</button>
+            </div>
+          </form>
+        </div>
+
         <div class="card">
           <h2>🏢 Wingas Directory</h2>
           <div class="table-responsive">
@@ -2012,6 +2031,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
             </table>
           </div>
         </div>
+
         <div class="card">
           <h2>💬 Customer Reviews (${reviews.length})</h2>
           <div class="table-responsive">
@@ -2021,6 +2041,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
             </table>
           </div>
         </div>
+
         <div class="card">
           <h2>📦 Product Moderation (${products.length})</h2>
           <div class="table-responsive">
@@ -2031,6 +2052,15 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
           </div>
         </div>
       </div>
+
+      <div id="imgModal" onclick="closeModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); justify-content: center; align-items: center; cursor: pointer;">
+        <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
+        <img id="modalImage" style="max-width: 85%; max-height: 85%; border-radius: 8px; object-fit: contain;">
+      </div>
+      <script>
+        function openModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imgModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('imgModal').style.display = 'none'; }
+      </script>
     </body>
     </html>
     `);
@@ -2062,6 +2092,31 @@ app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
       await db('wingas').where({ id: parseInt(req.body.wingaId) }).update({ expiryDate: baseDate, status: 'active' });
     }
   } catch (err) {}
+  res.redirect('/superadmin');
+});
+
+app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
+  try {
+    const name = (req.body.name || '').trim();
+    const phone = (req.body.phone || '').trim();
+    const rawPassword = (req.body.password || '123456').trim();
+    if (!name || !phone) return res.redirect('/superadmin');
+
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + 30);
+
+    await db('wingas').insert({
+      name,
+      phone,
+      password: hashedPassword,
+      status: 'active',
+      expiryDate: expiry,
+      dateAdded: new Date()
+    });
+  } catch (err) {
+    console.error('Error adding winga:', err);
+  }
   res.redirect('/superadmin');
 });
 
