@@ -191,7 +191,7 @@ async function connectToWhatsApp() {
         let location = 'Haikutajwa';
         let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
         let size = 'Standard';
-        let color = '';
+        let color = 'Kama pichani';
         let qty = 1;
         let notes = '';
 
@@ -283,7 +283,7 @@ async function connectToWhatsApp() {
                 `📌 *Status:* 🟡 Pending\n\n` +
                 `📍 *Fuatilia Oda Yako Hapa:*\n${trackUrl}`
         });
-        notifyWinga(newOrder, product);
+        await notifyWinga(newOrder, product);
         continue;
       }
 
@@ -396,6 +396,7 @@ app.get('/catalog', async (req, res) => {
       const mainImage = imageList[0] || '';
       const categoryStr = (p.category || 'General').trim();
       const availableSizes = (p.size || 'Standard').trim();
+      const availableColors = (p.colors || 'Kama pichani').trim();
       const matchedWinga = wingas.find(w => w.id === p.wingaId);
       const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
       const sellerLocation = matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
@@ -433,6 +434,7 @@ app.get('/catalog', async (req, res) => {
           data-name="${escapeHtml(p.name)}"
           data-price="${priceFormatted}"
           data-sizes="${escapeHtml(availableSizes)}"
+          data-colors="${escapeHtml(availableColors)}"
           onclick="handleOrderClick(this)"
           style="background: #25D366; color: white; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%;">
           🛒 Agiza Sasa
@@ -583,14 +585,7 @@ app.get('/catalog', async (req, res) => {
             <div class="form-group">
               <label>Rangi (Color):</label>
               <select id="orderColor">
-                <option value="Kama ilivyo pichani">Kama pichani</option>
-                <option value="Nyeusi (Black)">Nyeusi (Black)</option>
-                <option value="Nyeupe (White)">Nyeupe (White)</option>
-                <option value="Bluu (Blue)">Bluu (Blue)</option>
-                <option value="Nyekundu (Red)">Nyekundu (Red)</option>
-                <option value="Kijani (Green)">Kijani (Green)</option>
-                <option value="Njano (Yellow)">Njano (Yellow)</option>
-                <option value="Kijivu (Grey)">Kijivu (Grey)</option>
+                <option value="Kama pichani">Kama pichani</option>
               </select>
             </div>
           </div>
@@ -687,10 +682,11 @@ app.get('/catalog', async (req, res) => {
           var name = btn.getAttribute('data-name');
           var price = btn.getAttribute('data-price');
           var sizesStr = btn.getAttribute('data-sizes') || 'Standard';
-          openModal(id, name, price, sizesStr);
+          var colorsStr = btn.getAttribute('data-colors') || 'Kama pichani';
+          openModal(id, name, price, sizesStr, colorsStr);
         }
 
-        function openModal(id, name, price, sizesStr) {
+        function openModal(id, name, price, sizesStr, colorsStr) {
           document.getElementById('selectedProductId').value = id;
           document.getElementById('selectedProductName').value = name;
           document.getElementById('selectedProductPrice').value = price;
@@ -716,6 +712,20 @@ app.get('/catalog', async (req, res) => {
             });
           } else {
             sizeSelect.innerHTML = '<option value="Standard">Standard</option>';
+          }
+
+          const colorSelect = document.getElementById('orderColor');
+          colorSelect.innerHTML = '';
+          const parsedColors = colorsStr.split(',').map(c => c.trim()).filter(Boolean);
+          if (parsedColors.length > 0) {
+            parsedColors.forEach(c => {
+              const opt = document.createElement('option');
+              opt.value = c;
+              opt.textContent = c;
+              colorSelect.appendChild(opt);
+            });
+          } else {
+            colorSelect.innerHTML = '<option value="Kama pichani">Kama pichani</option>';
           }
 
           document.getElementById('orderModal').style.display = 'flex';
@@ -777,21 +787,26 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Track Route
+// Track Route with Public Reviews and Fraud Reporting Option
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
     let shopId = req.query.shop ? parseInt(req.query.shop) : null;
     let resultHtml = '';
+    
     if (searchId) {
       const order = await db('orders').where({ orderId: searchId }).first();
       if (order) {
         if (!shopId && order.wingaId) shopId = order.wingaId;
         const currentStatus = order.status || 'Pending';
         const existingReview = await db('reviews').where({ orderId: searchId }).first();
+        const allOrderReviews = await db('reviews').where({ orderId: searchId }).select('*');
+        const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
+        
         let statusBadge = '🟡 Pending (Inashughulikiwa)';
         if (currentStatus === 'Dispatched') statusBadge = '🚚 Dispatched (Ipo Njiani Kuja)';
         if (currentStatus === 'Completed') statusBadge = '✅ Completed (Imekamilika)';
+
         let reviewSection = '';
         if (currentStatus === 'Completed') {
           if (existingReview) {
@@ -826,6 +841,20 @@ app.get('/track', async (req, res) => {
             </div>`;
           }
         }
+
+        // Public Reviews Section for this Order
+        let publicReviewsHtml = '';
+        if (allOrderReviews.length > 0) {
+          publicReviewsHtml = `<div style="margin-top: 15px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📢 Maoni ya Umma (Public Reviews):</h4>` +
+            allOrderReviews.map(r => `<div style="font-size: 13px; border-bottom: 1px solid #f1f3f5; padding-bottom: 6px; margin-bottom: 6px;">
+              <span>${'⭐'.repeat(r.rating)}</span> <span style="color: #666; font-size: 11px;">(${new Date(r.date).toLocaleDateString()})</span><br>
+              <em>"${escapeHtml(r.comment)}"</em>
+            </div>`).join('') + `</div>`;
+        }
+
+        const reportFraudMsg = encodeURIComponent(`🚨 RIPOTI YA DHULUMA / TATIZO:\nNaomba kuripoti oda #${order.orderId} ya bidhaa (${order.productName}) yenye thamani ya TSh ${Number(order.sellingPrice).toLocaleString()}. Tatizo ni: `);
+
         resultHtml = `
         <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px; word-break:break-word;">
           <h3 style="margin:0 0 10px 0; color:#111; font-size:17px;">Oda #${order.orderId}</h3>
@@ -833,7 +862,17 @@ app.get('/track', async (req, res) => {
           <p style="margin:5px 0; font-size:14px;"><strong>💰 Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p>
           <p style="margin:5px 0; font-size:14px;"><strong>📍 Eneo:</strong> ${escapeHtml(order.location)}</p>
           <p style="margin:10px 0; padding:8px 12px; background:#f0f0f0; border-radius:6px; display:inline-block; font-weight:bold; font-size:13px;">Status: ${statusBadge}</p>
+          
+          <div style="margin-top: 12px;">
+            <a href="/admin/order/invoice?id=${order.orderId}" target="_blank" style="background: #007bff; color: white; padding: 10px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">📄 Tazama Risiti Yako (Digital Invoice)</a>
+          </div>
+
           ${reviewSection}
+          ${publicReviewsHtml}
+
+          <div style="margin-top: 15px; text-align: center;">
+            <a href="https://wa.me/${botPhone}?text=${reportFraudMsg}" target="_blank" style="color: #dc3545; font-size: 12px; font-weight: bold; text-decoration: underline;">🚨 Ripoti Dhuluma / Tatizo hapa</a>
+          </div>
         </div>`;
       } else {
         resultHtml = `<div style="background:#f8d7da; color:#721c24; padding:12px; border-radius:6px; margin-top:20px; text-align:center; font-size:14px;">❌ Hakuna Oda yenye Namba #${searchId}.</div>`;
@@ -974,11 +1013,10 @@ app.post('/login', async (req, res) => {
       return res.send('❌ Tafadhali jaza taarifa za kuingia. <br><a href="/login">Jaribu Tena</a>');
     }
 
-    // Superadmin Wawili (Configured via Environment Variables)
-    const superAdminPhone1 = process.env.SUPERADMIN_PHONE_1 || '0678143403';
-    const superAdminPass1 = process.env.SUPERADMIN_PASS_1 || 'SuperSecurePass2026!';
-    const superAdminPhone2 = process.env.SUPERADMIN_PHONE_2 || '0745423403';
-    const superAdminPass2 = process.env.SUPERADMIN_PASS_2 || 'WingaAdminPass2026!';
+    const superAdminPhone1 = process.env.SUPERADMIN_PHONE_1 || '0700000001';
+    const superAdminPass1 = process.env.SUPERADMIN_PASS_1 || 'SuperSecurePass123!';
+    const superAdminPhone2 = process.env.SUPERADMIN_PHONE_2 || '0700000002';
+    const superAdminPass2 = process.env.SUPERADMIN_PASS_2 || 'SuperSecurePass456!';
 
     if ((identifier === superAdminPhone1 && password === superAdminPass1) || 
         (identifier === superAdminPhone2 && password === superAdminPass2)) {
@@ -1268,6 +1306,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         <td>TSh ${buyingPrice.toLocaleString()}</td>
         <td>TSh ${sellingPrice.toLocaleString()}</td>
         <td>${escapeHtml(p.size || 'Standard')}</td>
+        <td>${escapeHtml(p.colors || 'Kama pichani')}</td>
         <td>
           <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
             <input type="hidden" name="id" value="${p.id}">
@@ -1483,11 +1522,12 @@ app.get('/admin', requireWinga, async (req, res) => {
             </div>
             <div class="form-row">
               <div class="form-group"><label>Available Sizes (Mf: S, M, L, XL au Standard)</label><input type="text" name="size" value="Standard"></div>
-              <div class="form-group">
-                <label>Picha za Bidhaa (Max 4)</label>
-                <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
-                <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px; font-size: 11px;"></small>
-              </div>
+              <div class="form-group"><label>Available Colors (Mf: Nyeusi, Nyekundu, Bluu)</label><input type="text" name="colors" value="Kama pichani"></div>
+            </div>
+            <div class="form-group">
+              <label>Picha za Bidhaa (Max 4)</label>
+              <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
+              <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px; font-size: 11px;"></small>
             </div>
             <button type="submit" class="btn-add">Upload & Add to Catalog</button>
           </form>
@@ -1524,8 +1564,8 @@ app.get('/admin', requireWinga, async (req, res) => {
           </div>
           <div class="table-responsive">
             <table>
-              <thead><tr><th>ID</th><th>Photos</th><th>Name</th><th>Category</th><th>Buying Price</th><th>Selling Price</th><th>Size</th><th>Action</th></tr></thead>
-              <tbody id="sellerProductTable">${productRows || '<tr><td colspan="8">No products added yet.</td></tr>'}</tbody>
+              <thead><tr><th>ID</th><th>Photos</th><th>Name</th><th>Category</th><th>Buying Price</th><th>Selling Price</th><th>Size</th><th>Colors</th><th>Action</th></tr></thead>
+              <tbody id="sellerProductTable">${productRows || '<tr><td colspan="9">No products added yet.</td></tr>'}</tbody>
             </table>
           </div>
         </div>
@@ -1622,7 +1662,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
       return res.redirect('/admin?error=upload');
     }
     try {
-      const { name, category, buyingPrice, sellingPrice, size } = req.body;
+      const { name, category, buyingPrice, sellingPrice, size, colors } = req.body;
       const files = req.files || [];
       let imageUrls = [];
 
@@ -1650,6 +1690,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
         sellingPrice: parseFloat(sellingPrice || 0),
         price: parseFloat(sellingPrice || 0),
         size: size ? size.trim() : 'Standard',
+        colors: colors ? colors.trim() : 'Kama pichani',
         imageUrl: JSON.stringify(imageUrls),
         dateAdded: new Date()
       });
@@ -1658,7 +1699,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
       const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
 
       if (currentWinga && newProduct) {
-        notifyShopCustomers(currentWinga, newProduct);
+        await notifyShopCustomers(currentWinga, newProduct);
       }
       res.redirect('/admin?added=true');
     } catch (dbErr) {
@@ -1781,7 +1822,7 @@ app.get('/forgot-password', (req, res) => {
 app.post('/forgot-password', async (req, res) => {
   try {
     if (!isWhatsappReady || !sock) {
-      return res.status(503).send('❌ WhatsApp haijawa tayari. Subiri sekunde chache. <br><a href="/forgot-password">Rudi Nyuma</a>');
+      return res.status(503).send('❌ WhatsApp haijawa tayari. Subiri sekunde chache ujaribu tena. <br><a href="/forgot-password">Rudi Nyuma</a>');
     }
     const rawPhone = (req.body.phone || '').trim();
     let cleanedPhone = rawPhone.replace(/\D/g, '');
