@@ -81,10 +81,25 @@ const upload = multer({
   }
 }).array('images', 4);
 
-// Authentication Guard Middlewares
-function requireWinga(req, res, next) {
+// Authentication & Real-time Expiry Guard Middleware
+async function requireWinga(req, res, next) {
   if (!req.session || !req.session.wingaId) {
     return res.redirect('/login');
+  }
+  try {
+    const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
+    if (!currentWinga) return res.redirect('/login');
+
+    // Real-time Expiry Check
+    if (currentWinga.expiryDate) {
+      const expiry = new Date(currentWinga.expiryDate);
+      const now = new Date();
+      if (now > expiry && currentWinga.status === 'active') {
+        await db('wingas').where({ id: currentWinga.id }).update({ status: 'suspended' });
+      }
+    }
+  } catch (err) {
+    console.error('requireWinga error:', err);
   }
   next();
 }
@@ -1065,7 +1080,6 @@ app.post('/track/review', async (req, res) => {
     const { orderId, rating, comment } = req.body;
     const oid = parseInt(orderId);
     
-    // Ensure customer is verified for this order before allowing review submission
     const verifiedOrders = req.session.verifiedOrders || {};
     if (!verifiedOrders[oid]) {
       return res.redirect(`/track?id=${oid}`);
@@ -1347,7 +1361,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard
+// Admin Dashboard (Protected by requireWinga with real-time expiry suspension)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
