@@ -40,12 +40,45 @@ app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Landing Page
+// Landing Page with Contact Us & About Us
 app.get(['/', '/index.html'], (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   fs.readFile(indexPath, 'utf8', (err, html) => {
     if (err) {
-      return res.redirect('/catalog');
+      // Fallback Landing Page if static file missing
+      const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
+      return res.send(`
+        <!DOCTYPE html>
+        <html lang="sw">
+        <head>
+          <meta charset="UTF-8">
+          <title>Winga Shop - Soko La Mtandaoni Tanzania</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: sans-serif; background: #f4f6f8; margin: 0; padding: 20px; text-align: center; color: #333; }
+            .container { max-width: 600px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+            h1 { color: #007bff; }
+            .btn { display: inline-block; background: #25D366; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 10px; }
+            .btn-admin { background: #007bff; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🛍️ Karibu Winga Shop</h1>
+            <p>Soko bora la mtandaoni linalowaunganisha wauzaji (winga) na wanunuzi Tanzania nzima kwa urahisi kupitia WhatsApp.</p>
+            <hr style="margin: 20px 0; border:0; border-top:1px solid #eee;">
+            <h3>ℹ️ Kuhusu Sisi (About Us)</h3>
+            <p style="font-size: 14px; color: #555;">Winga Shop inakuwezesha wewe muuzaji kutangaza bidhaa zako na wateja kuagiza moja kwa moja kupitia mfumo wa kisasa wa WhatsApp bot.</p>
+            <h3>📞 Wasiliana Nasi (Contact Us)</h3>
+            <p style="font-size: 14px; color: #555;">Simu / WhatsApp: +${botPhone}<br>Barua pepe: support@wingashop.co.tz</p>
+            <div style="margin-top: 25px;">
+              <a href="/catalog" class="btn">🛒 Ingia Kwenye Catalog</a>
+              <a href="/login" class="btn btn-admin">🔐 Ingia / Jisajili (Winga)</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
     }
     res.send(html);
   });
@@ -90,7 +123,6 @@ async function requireWinga(req, res, next) {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
     if (!currentWinga) return res.redirect('/login');
 
-    // Real-time Expiry Check
     if (currentWinga.expiryDate) {
       const expiry = new Date(currentWinga.expiryDate);
       const now = new Date();
@@ -111,7 +143,6 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-// Helper to standardise product image URLs
 function getProductImages(product) {
   if (!product) return [];
   let raw = product.imageUrl;
@@ -126,7 +157,6 @@ function getProductImages(product) {
   return list.map(img => (img ? String(img).trim() : '')).filter(Boolean);
 }
 
-// Helper for escaping HTML attributes
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)
@@ -376,7 +406,7 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Public Catalog Route
+// Public Catalog Route with Language Switcher, Help & About/Contact
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -425,7 +455,7 @@ app.get('/catalog', async (req, res) => {
       const imageHtml = (mainImage && mainImage.trim() !== '')
         ? `<div style="position: relative; cursor: pointer;" onclick="openImgModal(document.getElementById('img-${p.id}').getAttribute('data-fullsrc') || '${mainImage}')">
             <img id="img-${p.id}" data-fullsrc="${mainImage}" src="${mainImage}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
-            <span style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.65); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">🔍 Gusa Kukuza</span>
+            <span class="lbl-zoom" style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.65); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">🔍 Gusa Kukuza</span>
            </div>${galleryThumbnailsHtml}`
         : `<div style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd;">📦</div>`;
 
@@ -451,6 +481,7 @@ app.get('/catalog', async (req, res) => {
           data-sizes="${escapeHtml(availableSizes)}"
           data-colors="${escapeHtml(availableColors)}"
           onclick="handleOrderClick(this)"
+          class="order-btn-text"
           style="background: #25D366; color: white; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%;">
           🛒 Agiza Sasa
         </button>
@@ -458,7 +489,7 @@ app.get('/catalog', async (req, res) => {
     }).join('');
 
     if (products.length === 0) {
-      productCards = '<p style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
+      productCards = '<p class="no-prod-text" style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
     }
 
     res.send(`
@@ -474,13 +505,13 @@ app.get('/catalog', async (req, res) => {
         .container { max-width: 900px; margin: 0 auto; }
         .header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
         .nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; }
-        .track-btn { background: #007bff; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; flex: 1; text-align: center; }
-        .contact-btn { background: #25D366; color: white; padding: 9px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1; text-align: center; }
+        .track-btn { background: #007bff; color: white; padding: 9px 12px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; text-align: center; }
+        .contact-btn { background: #25D366; color: white; padding: 9px 12px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 4px; text-align: center; }
+        .extra-btn { background: #6c757d; color: white; padding: 9px 12px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; border: none; cursor: pointer; }
         .filter-bar { display: flex; gap: 8px; margin-bottom: 15px; flex-direction: column; }
         @media(min-width: 600px) {
           .filter-bar { flex-direction: row; }
           .nav-btns { width: auto; flex: unset; }
-          .track-btn, .contact-btn { flex: unset; }
         }
         .filter-bar input, .filter-bar select { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; width: 100%; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
@@ -490,7 +521,7 @@ app.get('/catalog', async (req, res) => {
         }
         h1 { color: #111; font-size: 20px; margin: 0; word-break: break-word; }
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 1000; padding: 10px; box-sizing: border-box; }
-        .modal-content { background: white; padding: 20px; border-radius: 12px; width: 100%; max-width: 380px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
+        .modal-content { background: white; padding: 20px; border-radius: 12px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
         .close-btn { position: absolute; top: 12px; right: 15px; font-size: 24px; cursor: pointer; color: #aaa; border: none; background: none; }
         .form-group { margin-bottom: 12px; text-align: left; }
         .form-group label { display: block; font-weight: bold; margin-bottom: 4px; color: #333; font-size: 12px; }
@@ -502,20 +533,23 @@ app.get('/catalog', async (req, res) => {
     <body>
       <div class="container">
         <div class="header-bar">
-          <h1>${escapeHtml(shopName)}</h1>
+          <h1 id="shopTitleHeader">${escapeHtml(shopName)}</h1>
           <div class="nav-btns">
-            <a href="https://wa.me/${botPhone}?text=Habari!%20Naomba%20msaada%20tafadhali" target="_blank" class="contact-btn">💬 Contact Us</a>
-            <a href="${trackBtnUrl}" class="track-btn">🔍 Fuatilia Oda</a>
+            <button class="extra-btn" onclick="toggleLanguage()" id="langBtn">🌐 EN / SW</button>
+            <button class="extra-btn" onclick="openHelpModal()" id="helpBtn">❓ Msaada / FAQs</button>
+            <button class="extra-btn" onclick="openAboutModal()" id="aboutBtn">ℹ️ About / Contact</button>
+            <a href="https://wa.me/${botPhone}?text=Habari!%20Naomba%20msaada%20tafadhali" target="_blank" class="contact-btn" id="contactUsBtn">💬 Contact Us</a>
+            <a href="${trackBtnUrl}" class="track-btn" id="trackOrderBtn">🔍 Fuatilia Oda</a>
           </div>
         </div>
         <div class="filter-bar">
           <input type="text" id="searchInput" onkeyup="filterCatalog()" placeholder="🔍 Tafuta bidhaa au duka...">
           <select id="shopSelect" onchange="filterCatalog()">
-            <option value="all">🏪 Maduka Yote (All Shops)</option>
+            <option value="all" id="optAllShops">🏪 Maduka Yote (All Shops)</option>
             ${shopOptions}
           </select>
           <select id="categorySelect" onchange="filterCatalog()">
-            <option value="all">📁 Vipengele Vyote (Categories)</option>
+            <option value="all" id="optAllCats">📁 Vipengele Vyote (Categories)</option>
             ${categoryOptions}
           </select>
         </div>
@@ -524,11 +558,38 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
+      <!-- Help / FAQ Modal -->
+      <div id="helpModal" class="modal-overlay">
+        <div class="modal-content">
+          <button class="close-btn" onclick="closeHelpModal()">&times;</button>
+          <h3 style="margin-top:0; color:#111; font-size:18px;" id="helpModalTitle">❓ Msaada & Maswali (FAQs)</h3>
+          <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
+            <p><strong>1. Jinsi ya kuagiza bidhaa?</strong><br>Bonyeza kitufe cha "Agiza Sasa" kwenye bidhaa unayotaka, jaza taarifa zako (namba ya simu na eneo), kisha tuma oda moja kwa moja kupitia WhatsApp.</p>
+            <p><strong>2. Jinsi ya kufuatilia oda yako?</strong><br>Bofya "Fuatilia Oda", weka namba yako ya oda na namba ya simu uliyotumia kuagiza ili kuona kama imeshafika au ipo njiani.</p>
+            <p><strong>3. Jinsi ya kuwa muuzaji (Winga)?</strong><br>Unaweza kujisajili kupitia ukurasa wa Login/Register au kuwasiliana na Admin wa mfumo.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- About / Contact Modal -->
+      <div id="aboutModal" class="modal-overlay">
+        <div class="modal-content">
+          <button class="close-btn" onclick="closeAboutModal()">&times;</button>
+          <h3 style="margin-top:0; color:#111; font-size:18px;" id="aboutModalTitle">ℹ️ Kuhusu Sisi & Mawasiliano</h3>
+          <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
+            <p><strong>Winga Shop</strong> ni soko la kidijitali linalorahisisha biashara ya mtandaoni kwa wauzaji na wanunuzi nchini Tanzania.</p>
+            <p><strong>Wasiliana Nasi:</strong><br>📞 WhatsApp/Simu: +${botPhone}<br>📍 Eneo: Dar es Salaam, Tanzania</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lightbox Modal -->
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 15px; box-sizing: border-box;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
+      <!-- Order Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="closeModal()">&times;</button>
@@ -539,13 +600,13 @@ app.get('/catalog', async (req, res) => {
           <input type="hidden" id="selectedProductPrice">
 
           <div class="form-group">
-            <label>Namba ya Simu (Tarakimu 10):</label>
+            <label id="lblPhone">Namba ya Simu (Tarakimu 10):</label>
             <input type="tel" id="orderPhone" placeholder="0712345678" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10)" required>
           </div>
 
           <div class="form-row-2">
             <div class="form-group">
-              <label>Mkoa:</label>
+              <label id="lblRegion">Mkoa:</label>
               <select id="orderRegion" onchange="updateOrderDistricts()" required>
                 <option value="">-- Mkoa --</option>
                 <option value="Dar es Salaam">Dar es Salaam</option>
@@ -578,7 +639,7 @@ app.get('/catalog', async (req, res) => {
               </select>
             </div>
             <div class="form-group">
-              <label>Wilaya:</label>
+              <label id="lblDistrict">Wilaya:</label>
               <select id="orderDistrict" required>
                 <option value="">-- Kwanza Mkoa --</option>
               </select>
@@ -586,19 +647,19 @@ app.get('/catalog', async (req, res) => {
           </div>
 
           <div class="form-group">
-            <label>Kata / Mtaa Unapoishi:</label>
+            <label id="lblWard">Kata / Mtaa Unapoishi:</label>
             <input type="text" id="orderWard" placeholder="Mfano: Sinza, Kariakoo" required>
           </div>
 
           <div class="form-row-2">
             <div class="form-group">
-              <label>Size:</label>
+              <label id="lblSize">Size:</label>
               <select id="orderSize">
                 <option value="Standard">Standard</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Rangi (Color):</label>
+              <label id="lblColor">Rangi (Color):</label>
               <select id="orderColor">
                 <option value="Kama pichani">Kama pichani</option>
               </select>
@@ -606,21 +667,113 @@ app.get('/catalog', async (req, res) => {
           </div>
 
           <div class="form-group">
-            <label>Idadi (Quantity):</label>
+            <label id="lblQty">Idadi (Quantity):</label>
             <input type="number" id="orderQty" value="1" min="1">
           </div>
 
           <div class="form-group">
-            <label>Maelezo ya Ziada (Si lazima):</label>
+            <label id="lblNotes">Maelezo ya Ziada (Si lazima):</label>
             <textarea id="orderNotes" rows="2" placeholder="Mfano: Niletee jioni..."></textarea>
           </div>
 
-          <button class="submit-btn" onclick="sendToWhatsApp()">📲 Tuma Oda kwa WhatsApp</button>
+          <button class="submit-btn" id="submitOrderBtn" onclick="sendToWhatsApp()">📲 Tuma Oda kwa WhatsApp</button>
         </div>
       </div>
 
       <script>
         var BOT_PHONE = "${botPhone}";
+        var currentLang = localStorage.getItem('winga_lang') || 'sw';
+
+        const translations = {
+          sw: {
+            contactUs: "💬 Contact Us",
+            trackOrder: "🔍 Fuatilia Oda",
+            searchPlaceholder: "🔍 Tafuta bidhaa au duka...",
+            allShops: "🏪 Maduka Yote (All Shops)",
+            allCats: "📁 Vipengele Vyote (Categories)",
+            orderBtn: "🛒 Agiza Sasa",
+            helpTitle: "❓ Msaada & Maswali (FAQs)",
+            aboutTitle: "ℹ️ Kuhusu Sisi & Mawasiliano",
+            zoomText: "🔍 Gusa Kukuza",
+            noProd: "Hakuna bidhaa kwenye duka hili kwa sasa.",
+            phoneLbl: "Namba ya Simu (Tarakimu 10):",
+            regionLbl: "Mkoa:",
+            districtLbl: "Wilaya:",
+            wardLbl: "Kata / Mtaa Unapoishi:",
+            sizeLbl: "Size:",
+            colorLbl: "Rangi (Color):",
+            qtyLbl: "Idadi (Quantity):",
+            notesLbl: "Maelezo ya Ziada (Si lazima):",
+            submitBtn: "📲 Tuma Oda kwa WhatsApp"
+          },
+          en: {
+            contactUs: "💬 Contact Us",
+            trackOrder: "🔍 Track Order",
+            searchPlaceholder: "🔍 Search products or shops...",
+            allShops: "🏪 All Shops",
+            allCats: "📁 All Categories",
+            orderBtn: "🛒 Order Now",
+            helpTitle: "❓ Help & FAQs",
+            aboutTitle: "ℹ️ About Us & Contact",
+            zoomText: "🔍 Tap to Zoom",
+            noProd: "No products available in this shop.",
+            phoneLbl: "Phone Number (10 digits):",
+            regionLbl: "Region:",
+            districtLbl: "District:",
+            wardLbl: "Ward / Street:",
+            sizeLbl: "Size:",
+            colorLbl: "Color:",
+            qtyLbl: "Quantity:",
+            notesLbl: "Additional Notes (Optional):",
+            submitBtn: "📲 Send Order via WhatsApp"
+          }
+        };
+
+        function applyLanguage() {
+          const t = translations[currentLang];
+          document.getElementById('contactUsBtn').textContent = t.contactUs;
+          document.getElementById('trackOrderBtn').textContent = t.trackOrder;
+          document.getElementById('searchInput').placeholder = t.searchPlaceholder;
+          document.getElementById('optAllShops').textContent = t.allShops;
+          document.getElementById('optAllCats').textContent = t.allCats;
+          document.getElementById('helpBtn').textContent = currentLang === 'en' ? '❓ Help / FAQs' : '❓ Msaada / FAQs';
+          document.getElementById('aboutBtn').textContent = currentLang === 'en' ? 'ℹ️ About / Contact' : 'ℹ️ About / Contact';
+          
+          document.querySelectorAll('.order-btn-text').forEach(el => el.textContent = t.orderBtn);
+          document.querySelectorAll('.lbl-zoom').forEach(el => el.textContent = t.zoomText);
+          const noProdEl = document.querySelector('.no-prod-text');
+          if (noProdEl) noProdEl.textContent = t.noProd;
+
+          document.getElementById('helpModalTitle').textContent = t.helpTitle;
+          document.getElementById('aboutModalTitle').textContent = t.aboutTitle;
+
+          document.getElementById('lblPhone').textContent = t.phoneLbl;
+          document.getElementById('lblRegion').textContent = t.regionLbl;
+          document.getElementById('lblDistrict').textContent = t.districtLbl;
+          document.getElementById('lblWard').textContent = t.wardLbl;
+          document.getElementById('lblSize').textContent = t.sizeLbl;
+          document.getElementById('lblColor').textContent = t.colorLbl;
+          document.getElementById('lblQty').textContent = t.qtyLbl;
+          document.getElementById('lblNotes').textContent = t.notesLbl;
+          document.getElementById('submitOrderBtn').textContent = t.submitBtn;
+          document.getElementById('langBtn').textContent = currentLang === 'sw' ? '🌐 SW / EN' : '🌐 EN / SW';
+        }
+
+        function toggleLanguage() {
+          currentLang = currentLang === 'sw' ? 'en' : 'sw';
+          localStorage.setItem('winga_lang', currentLang);
+          applyLanguage();
+        }
+
+        window.onload = function() {
+          applyLanguage();
+        };
+
+        function openHelpModal() { document.getElementById('helpModal').style.display = 'flex'; }
+        function closeHelpModal() { document.getElementById('helpModal').style.display = 'none'; }
+        function openAboutModal() { document.getElementById('aboutModal').style.display = 'flex'; }
+        function closeAboutModal() { document.getElementById('aboutModal').style.display = 'none'; }
+
         const orderDistrictsData = {
           "Dar es Salaam": ["Kinondoni", "Ilala", "Temeke", "Ubungo", "Kigamboni"],
           "Arusha": ["Arusha Mjini", "Arumeru", "Karatu", "Longido", "Ngorongoro", "Monduli"],
@@ -791,6 +944,8 @@ app.get('/catalog', async (req, res) => {
 
         window.onclick = function(e) {
           if (e.target === document.getElementById('orderModal')) closeModal();
+          if (e.target === document.getElementById('helpModal')) closeHelpModal();
+          if (e.target === document.getElementById('aboutModal')) closeAboutModal();
         };
       </script>
     </body>
@@ -956,7 +1111,6 @@ app.get('/track', async (req, res) => {
   }
 });
 
-// Handle Phone Verification for Tracking
 app.post('/track/verify', async (req, res) => {
   try {
     const { orderId, phone, shop } = req.body;
@@ -1003,7 +1157,6 @@ app.post('/track/verify', async (req, res) => {
   }
 });
 
-// Secure Customer Invoice Route
 app.get('/track/invoice', async (req, res) => {
   try {
     const orderId = parseInt(req.query.id);
@@ -1359,7 +1512,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Admin Dashboard (Protected by requireWinga with real-time expiry suspension)
+// Admin Dashboard with Language Switcher & Help Modal
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1569,6 +1722,10 @@ app.get('/admin', requireWinga, async (req, res) => {
         th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; white-space: nowrap; }
         th { background: #f8f9fa; font-size: 12px; }
         .contact-support { background: #25D366; color: white; border: none; padding: 8px 12px; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+        .admin-nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 1000; padding: 10px; box-sizing: border-box; }
+        .modal-content { background: white; padding: 20px; border-radius: 12px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative; }
+        .close-btn { position: absolute; top: 12px; right: 15px; font-size: 24px; cursor: pointer; color: #aaa; border: none; background: none; }
       </style>
     </head>
     <body>
@@ -1577,20 +1734,35 @@ app.get('/admin', requireWinga, async (req, res) => {
         ${subscriptionBanner}
         <div class="top-nav">
           <h1>🛍️ Winga Dashboard - ${escapeHtml(currentWingaName)}</h1>
-          <div>
-            <a href="https://wa.me/${botPhone}?text=Habari%20Admin" target="_blank" class="contact-support">💬 Msaada</a>
-            <a href="/logout" style="margin-left: 8px; color:#dc3545; font-weight:bold; text-decoration:none; font-size:13px;">Logout</a>
+          <div class="admin-nav-btns">
+            <button class="contact-support" onclick="toggleAdminLanguage()" id="adminLangBtn" style="background:#6c757d; border:none; cursor:pointer;">🌐 SW / EN</button>
+            <button class="contact-support" onclick="openAdminHelp()" style="background:#17a2b8; border:none; cursor:pointer;" id="adminHelpBtn">❓ Msaada / FAQs</button>
+            <a href="https://wa.me/${botPhone}?text=Habari%20Admin" target="_blank" class="contact-support" id="adminContactBtn">💬 Msaada</a>
+            <a href="/logout" style="margin-left: 8px; color:#dc3545; font-weight:bold; text-decoration:none; font-size:13px;" id="adminLogoutBtn">Logout</a>
+          </div>
+        </div>
+
+        <!-- Admin Help Modal -->
+        <div id="adminHelpModal" class="modal-overlay">
+          <div class="modal-content">
+            <button class="close-btn" onclick="closeAdminHelp()">&times;</button>
+            <h3 style="margin-top:0; color:#111; font-size:18px;" id="adminHelpTitle">❓ Mwongozo wa Muuzaji (Winga Guide)</h3>
+            <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
+              <p><strong>1. Kuweka Bidhaa Mpya:</strong><br>Jaza fomu ya bidhaa, chagua picha hadi 4 kutoka kwenye simu/kompyuta yako, kisha bofya "Upload & Add to Catalog". Wateja wako watapata taarifa WhatsApp moja kwa moja.</p>
+              <p><strong>2. Kusimamia Oda:</strong><br>Kwenye jedwali la oda, unaweza kubadilisha status kuwa "Dispatched" (Ipo njiani) au "Completed" (Imekamilika) ili mteja aweze kutoa maoni/nyota.</p>
+              <p><strong>3. Malipo ya Siku 30:</strong><br>Akaunti hudumu kwa siku 30. Ukikaribia kumaliza muda, utaona taarifa ya onyo. Wasiliana na Admin kupitia WhatsApp kuongeza siku.</p>
+            </div>
           </div>
         </div>
 
         <div class="card" style="background: #e3f2fd; border: 1px solid #90caf9;">
-          <h3 style="margin-top: 0; color: #0d47a1; font-size: 16px;">🔗 Link Yako ya Duka (Store Link)</h3>
+          <h3 style="margin-top: 0; color: #0d47a1; font-size: 16px;" id="storeLinkTitle">🔗 Link Yako ya Duka (Store Link)</h3>
           <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
             <input type="text" id="storeLinkInput" value="${shopUrl}" readonly style="flex: 1; min-width: 200px; padding: 10px; border: 1px solid #90caf9; border-radius: 4px; font-weight: bold; color: #0d47a1; background: white; font-size: 13px;">
-            <button type="button" onclick="copyStoreLink()" style="background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px;">📋 Nakili Link</button>
+            <button type="button" onclick="copyStoreLink()" style="background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px;" id="copyLinkBtn">📋 Nakili Link</button>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <a href="https://wa.me/?text=${shareWhatsAppText}" target="_blank" style="background: #25D366; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;">📲 Share to WhatsApp</a>
+            <a href="https://wa.me/?text=${shareWhatsAppText}" target="_blank" style="background: #25D366; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;" id="shareWaBtn">📲 Share to WhatsApp</a>
           </div>
         </div>
         <script>
@@ -1601,33 +1773,35 @@ app.get('/admin', requireWinga, async (req, res) => {
             navigator.clipboard.writeText(copyText.value);
             alert("✅ Link imenakiliwa! Sasa unaweza kui-paste popote.");
           }
+          function openAdminHelp() { document.getElementById('adminHelpModal').style.display = 'flex'; }
+          function closeAdminHelp() { document.getElementById('adminHelpModal').style.display = 'none'; }
         </script>
 
         <div class="card">
-          <h3 style="font-size:16px;">🔑 Badilisha Nenosiri</h3>
+          <h3 style="font-size:16px;" id="changePassTitle">🔑 Badilisha Nenosiri</h3>
           <form id="changePasswordForm">
             <div class="form-group">
-              <label>Nenosiri la Zamani:</label>
+              <label id="lblOldPass">Nenosiri la Zamani:</label>
               <div class="password-container">
                 <input type="password" id="oldPassword" required>
                 <button type="button" class="eye-btn" onclick="togglePassword('oldPassword', this)">👁️</button>
               </div>
             </div>
             <div class="form-group">
-              <label>Nenosiri Jipya:</label>
+              <label id="lblNewPass">Nenosiri Jipya:</label>
               <div class="password-container">
                 <input type="password" id="newPassword" required>
                 <button type="button" class="eye-btn" onclick="togglePassword('newPassword', this)">👁️</button>
               </div>
             </div>
             <div class="form-group">
-              <label>Rudia Nenosiri Jipya:</label>
+              <label id="lblConfirmPass">Rudia Nenosiri Jipya:</label>
               <div class="password-container">
                 <input type="password" id="confirmPassword" required>
                 <button type="button" class="eye-btn" onclick="togglePassword('confirmPassword', this)">👁️</button>
               </div>
             </div>
-            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">Hifadhi Nenosiri</button>
+            <button type="submit" style="background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;" id="savePassBtn">Hifadhi Nenosiri</button>
           </form>
         </div>
         <script>
@@ -1663,18 +1837,18 @@ app.get('/admin', requireWinga, async (req, res) => {
         </script>
 
         <div class="stats-grid">
-          <div class="stat-card"><h3>Completed Orders</h3><p>${completedOrdersCount}</p></div>
-          <div class="stat-card"><h3>Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
-          <div class="stat-card"><h3>Net Profit</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
+          <div class="stat-card"><h3 id="statCompleted">Completed Orders</h3><p>${completedOrdersCount}</p></div>
+          <div class="stat-card"><h3 id="statRevenue">Total Revenue</h3><p>TSh ${totalRevenue.toLocaleString()}</p></div>
+          <div class="stat-card"><h3 id="statProfit">Net Profit</h3><p style="color:#28a745;">TSh ${netProfit.toLocaleString()}</p></div>
         </div>
 
         <div class="card">
-          <h2>Weka Bidhaa Mpya (Max Picha 4)</h2>
+          <h2 id="addProductTitle">Weka Bidhaa Mpya (Max Picha 4)</h2>
           <form action="/admin/add" method="POST" enctype="multipart/form-data">
             <div class="form-row">
-              <div class="form-group"><label>Jina la Bidhaa</label><input type="text" name="name" placeholder="Mf: Smart Watch S8 au Gauni Kali" required></div>
+              <div class="form-group"><label id="lblProdName">Jina la Bidhaa</label><input type="text" name="name" placeholder="Mf: Smart Watch S8 au Gauni Kali" required></div>
               <div class="form-group">
-                <label>Aina (Category)</label>
+                <label id="lblCategory">Aina (Category)</label>
                 <select name="category" required>
                   <option value="">-- Chagua Aina ya Bidhaa --</option>
                   <option value="Clothes">Nguo (Clothes)</option>
@@ -1688,13 +1862,13 @@ app.get('/admin', requireWinga, async (req, res) => {
               </div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Bei ya Kununua (Buying Price - TSh)</label><input type="number" name="buyingPrice" required></div>
-              <div class="form-group"><label>Bei ya Kuuzia (Selling Price - TSh)</label><input type="number" name="sellingPrice" required></div>
+              <div class="form-group"><label id="lblBuying">Bei ya Kununua (Buying Price - TSh)</label><input type="number" name="buyingPrice" required></div>
+              <div class="form-group"><label id="lblSelling">Bei ya Kuuzia (Selling Price - TSh)</label><input type="number" name="sellingPrice" required></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label>Available Sizes (Mf: S, M, L, XL au Standard)</label><input type="text" name="size" value="Standard"></div>
+              <div class="form-group"><label id="lblSizeAdmin">Available Sizes (Mf: S, M, L, XL au Standard)</label><input type="text" name="size" value="Standard"></div>
               <div class="form-group">
-                <label>Available Colors (Rangi)</label>
+                <label id="lblColorAdmin">Available Colors (Rangi)</label>
                 <select name="colors">
                   <option value="Kama pichani">Kama pichani</option>
                   <option value="Nyeusi (Black)">Nyeusi (Black)</option>
@@ -1708,11 +1882,11 @@ app.get('/admin', requireWinga, async (req, res) => {
               </div>
             </div>
             <div class="form-group">
-              <label>Picha za Bidhaa (Max 4)</label>
+              <label id="lblImagesAdmin">Picha za Bidhaa (Max 4)</label>
               <input type="file" id="imageInput" name="images" accept="image/*" multiple required onchange="validateImages(this)">
               <small id="fileCountNotice" style="color: #007bff; font-weight: bold; display: block; margin-top: 4px; font-size: 11px;"></small>
             </div>
-            <button type="submit" class="btn-add">Upload & Add to Catalog</button>
+            <button type="submit" class="btn-add" id="uploadBtn">Upload & Add to Catalog</button>
           </form>
         </div>
         <script>
@@ -1731,7 +1905,7 @@ app.get('/admin', requireWinga, async (req, res) => {
         </script>
 
         <div class="card">
-          <h2>Customer Orders & Reviews (${orders.length})</h2>
+          <h2 id="ordersTitle">Customer Orders & Reviews (${orders.length})</h2>
           <div class="table-responsive">
             <table>
               <thead><tr><th>Photo</th><th>Order #</th><th>Product</th><th>Price</th><th>Location</th><th>Phone</th><th>Status</th><th>Feedback</th><th>Action</th></tr></thead>
@@ -1742,7 +1916,7 @@ app.get('/admin', requireWinga, async (req, res) => {
 
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
-            <h2 style="margin:0;">Product Catalog (${products.length})</h2>
+            <h2 style="margin:0;" id="catalogTitle">Product Catalog (${products.length})</h2>
             <input type="text" id="sellerSearchInput" onkeyup="filterSellerProducts()" placeholder="🔍 Tafuta bidhaa zako..." style="max-width:250px; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:13px;">
           </div>
           <div class="table-responsive">
@@ -1753,6 +1927,107 @@ app.get('/admin', requireWinga, async (req, res) => {
           </div>
         </div>
         <script>
+          var adminLang = localStorage.getItem('winga_admin_lang') || 'sw';
+          const adminTrans = {
+            sw: {
+              adminHelp: "❓ Msaada / FAQs",
+              contact: "💬 Msaada",
+              logout: "Logout",
+              storeTitle: "🔗 Link Yako ya Duka (Store Link)",
+              copyBtn: "📋 Nakili Link",
+              shareBtn: "📲 Share to WhatsApp",
+              changePass: "🔑 Badilisha Nenosiri",
+              oldPass: "Nenosiri la Zamani:",
+              newPass: "Nenosiri Jipya:",
+              confirmPass: "Rudia Nenosiri Jipya:",
+              saveBtn: "Hifadhi Nenosiri",
+              stat1: "Completed Orders",
+              stat2: "Total Revenue",
+              stat3: "Net Profit",
+              addTitle: "Weka Bidhaa Mpya (Max Picha 4)",
+              pName: "Jina la Bidhaa",
+              cat: "Aina (Category)",
+              buy: "Bei ya Kununua (Buying Price - TSh)",
+              sell: "Bei ya Kuuzia (Selling Price - TSh)",
+              sizeA: "Available Sizes (Mf: S, M, L, XL au Standard)",
+              colA: "Available Colors (Rangi)",
+              imgA: "Picha za Bidhaa (Max 4)",
+              upBtn: "Upload & Add to Catalog",
+              ordTitle: "Customer Orders & Reviews",
+              catTitle: "Product Catalog",
+              searchP: "🔍 Tafuta bidhaa zako..."
+            },
+            en: {
+              adminHelp: "❓ Help / FAQs",
+              contact: "💬 Support",
+              logout: "Logout",
+              storeTitle: "🔗 Your Store Link",
+              copyBtn: "📋 Copy Link",
+              shareBtn: "📲 Share to WhatsApp",
+              changePass: "🔑 Change Password",
+              oldPass: "Old Password:",
+              newPass: "New Password:",
+              confirmPass: "Confirm New Password:",
+              saveBtn: "Save Password",
+              stat1: "Completed Orders",
+              stat2: "Total Revenue",
+              stat3: "Net Profit",
+              addTitle: "Add New Product (Max 4 Images)",
+              pName: "Product Name",
+              cat: "Category",
+              buy: "Buying Price (TSh)",
+              sell: "Selling Price (TSh)",
+              sizeA: "Available Sizes (e.g., S, M, L, Standard)",
+              colA: "Available Colors",
+              imgA: "Product Images (Max 4)",
+              upBtn: "Upload & Add to Catalog",
+              ordTitle: "Customer Orders & Reviews",
+              catTitle: "Product Catalog",
+              searchP: "🔍 Search your products..."
+            }
+          };
+
+          function applyAdminLang() {
+            const t = adminTrans[adminLang];
+            document.getElementById('adminHelpBtn').textContent = t.adminHelp;
+            document.getElementById('adminContactBtn').textContent = t.contact;
+            document.getElementById('adminLogoutBtn').textContent = t.logout;
+            document.getElementById('storeLinkTitle').textContent = t.storeTitle;
+            document.getElementById('copyLinkBtn').textContent = t.copyBtn;
+            document.getElementById('shareWaBtn').textContent = t.shareBtn;
+            document.getElementById('changePassTitle').textContent = t.changePass;
+            document.getElementById('lblOldPass').textContent = t.oldPass;
+            document.getElementById('lblNewPass').textContent = t.newPass;
+            document.getElementById('lblConfirmPass').textContent = t.confirmPass;
+            document.getElementById('savePassBtn').textContent = t.saveBtn;
+            document.getElementById('statCompleted').textContent = t.stat1;
+            document.getElementById('statRevenue').textContent = t.stat2;
+            document.getElementById('statProfit').textContent = t.stat3;
+            document.getElementById('addProductTitle').textContent = t.addTitle;
+            document.getElementById('lblProdName').textContent = t.pName;
+            document.getElementById('lblCategory').textContent = t.cat;
+            document.getElementById('lblBuying').textContent = t.buy;
+            document.getElementById('lblSelling').textContent = t.sell;
+            document.getElementById('lblSizeAdmin').textContent = t.sizeA;
+            document.getElementById('lblColorAdmin').textContent = t.colA;
+            document.getElementById('lblImagesAdmin').textContent = t.imgA;
+            document.getElementById('uploadBtn').textContent = t.upBtn;
+            document.getElementById('ordersTitle').textContent = t.ordTitle;
+            document.getElementById('catalogTitle').textContent = t.catTitle;
+            document.getElementById('sellerSearchInput').placeholder = t.searchP;
+            document.getElementById('adminLangBtn').textContent = adminLang === 'sw' ? '🌐 SW / EN' : '🌐 EN / SW';
+          }
+
+          function toggleAdminLanguage() {
+            adminLang = adminLang === 'sw' ? 'en' : 'sw';
+            localStorage.setItem('winga_admin_lang', adminLang);
+            applyAdminLang();
+          }
+
+          window.addEventListener('DOMContentLoaded', () => {
+            applyAdminLang();
+          });
+
           function filterSellerProducts() {
             var input = document.getElementById('sellerSearchInput').value.toLowerCase().trim();
             var rows = document.querySelectorAll('#sellerProductTable tr.seller-product-row');
