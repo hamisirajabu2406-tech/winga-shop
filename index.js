@@ -281,7 +281,7 @@ async function connectToWhatsApp() {
                 `📞 *Simu:* ${phone}\n` +
                 `📍 *Eneo:* ${location}\n` +
                 `📌 *Status:* 🟡 Pending\n\n` +
-                `📍 *Fuatilia Oda Yako Hapa:*\n${trackUrl}`
+                `📍 *Fuatilia Oda Yako Hapa (Weka namba yako ya simu kuhakiki):*\n${trackUrl}`
         });
         await notifyWinga(newOrder, product);
         continue;
@@ -787,7 +787,7 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Track Route with Public Reviews and Fraud Reporting Option
+// Secure Track Route with Phone Verification & Public Reviews/Fraud Reporting
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id) : null;
@@ -798,82 +798,105 @@ app.get('/track', async (req, res) => {
       const order = await db('orders').where({ orderId: searchId }).first();
       if (order) {
         if (!shopId && order.wingaId) shopId = order.wingaId;
-        const currentStatus = order.status || 'Pending';
-        const existingReview = await db('reviews').where({ orderId: searchId }).first();
-        const allOrderReviews = await db('reviews').where({ orderId: searchId }).select('*');
-        const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
-        
-        let statusBadge = '🟡 Pending (Inashughulikiwa)';
-        if (currentStatus === 'Dispatched') statusBadge = '🚚 Dispatched (Ipo Njiani Kuja)';
-        if (currentStatus === 'Completed') statusBadge = '✅ Completed (Imekamilika)';
 
-        let reviewSection = '';
-        if (currentStatus === 'Completed') {
-          if (existingReview) {
-            reviewSection = `
-            <div style="background:#e8f5e9; padding:15px; border-radius:8px; margin-top:15px;">
-              <h4 style="margin:0 0 5px 0; color:#2e7d32;">AHSANTE KWA FEEDBACK YAKO!</h4>
-              <p style="margin:0; font-size:18px;">${'⭐'.repeat(existingReview.rating)}</p>
-              <p style="margin:5px 0 0 0; color:#555;"><em>"${escapeHtml(existingReview.comment)}"</em></p>
-            </div>`;
-          } else {
-            reviewSection = `
-            <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-top:15px; border:1px solid #e9ecef;">
-              <h4 style="margin:0 0 10px 0;">Toa Maoni & Nyota (Review Order)</h4>
-              <form action="/track/review" method="POST">
-                <input type="hidden" name="orderId" value="${order.orderId}">
-                <div style="margin-bottom:10px;">
-                  <label style="font-size:12px; font-weight:bold;">Chagua Nyota (Rating):</label>
-                  <select name="rating" style="width:100%; padding:8px; border-radius:4px; margin-top:4px;" required>
-                    <option value="5">⭐⭐⭐⭐⭐ (5/5 - Bora Sana)</option>
-                    <option value="4">⭐⭐⭐⭐ (4/5 - Nzuri)</option>
-                    <option value="3">⭐⭐⭐ (3/5 - Kawaida)</option>
-                    <option value="2">⭐⭐ (2/5 - Vibaya)</option>
-                    <option value="1">⭐ (1/5 - Mbaya Sana)</option>
-                  </select>
-                </div>
-                <div style="margin-bottom:10px;">
-                  <label style="font-size:12px; font-weight:bold;">Maoni Yako (Comment):</label>
-                  <textarea name="comment" rows="3" style="width:100%; padding:8px; border-radius:4px; box-sizing:border-box;" placeholder="Andika maoni yako..." required></textarea>
-                </div>
-                <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">Tuma Feedback</button>
-              </form>
-            </div>`;
-          }
-        }
+        // Check if customer is verified for this order in session
+        const verifiedOrders = req.session.verifiedOrders || {};
+        const isVerified = verifiedOrders[searchId] === true;
 
-        // Public Reviews Section for this Order
-        let publicReviewsHtml = '';
-        if (allOrderReviews.length > 0) {
-          publicReviewsHtml = `<div style="margin-top: 15px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px;">
-            <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📢 Maoni ya Umma (Public Reviews):</h4>` +
-            allOrderReviews.map(r => `<div style="font-size: 13px; border-bottom: 1px solid #f1f3f5; padding-bottom: 6px; margin-bottom: 6px;">
-              <span>${'⭐'.repeat(r.rating)}</span> <span style="color: #666; font-size: 11px;">(${new Date(r.date).toLocaleDateString()})</span><br>
-              <em>"${escapeHtml(r.comment)}"</em>
-            </div>`).join('') + `</div>`;
-        }
-
-        const reportFraudMsg = encodeURIComponent(`🚨 RIPOTI YA DHULUMA / TATIZO:\nNaomba kuripoti oda #${order.orderId} ya bidhaa (${order.productName}) yenye thamani ya TSh ${Number(order.sellingPrice).toLocaleString()}. Tatizo ni: `);
-
-        resultHtml = `
-        <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px; word-break:break-word;">
-          <h3 style="margin:0 0 10px 0; color:#111; font-size:17px;">Oda #${order.orderId}</h3>
-          <p style="margin:5px 0; font-size:14px;"><strong>📦 Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
-          <p style="margin:5px 0; font-size:14px;"><strong>💰 Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p>
-          <p style="margin:5px 0; font-size:14px;"><strong>📍 Eneo:</strong> ${escapeHtml(order.location)}</p>
-          <p style="margin:10px 0; padding:8px 12px; background:#f0f0f0; border-radius:6px; display:inline-block; font-weight:bold; font-size:13px;">Status: ${statusBadge}</p>
+        if (!isVerified) {
+          // Ask for Phone Number Verification to Prevent IDOR & Unauthorized Scams
+          resultHtml = `
+          <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px;">
+            <h3 style="margin:0 0 10px 0; color:#111; font-size:16px;">🔒 Uhakiki wa Usalama (Security Verification)</h3>
+            <p style="font-size:13px; color:#555; margin-bottom:15px;">Ili kulinda faragha ya mteja na kuzuia wengine kuchungulia, tafadhali weka namba ya simu uliyotumia kuagizia <strong>Oda #${searchId}</strong> ili kuona taarifa zake.</p>
+            <form action="/track/verify" method="POST">
+              <input type="hidden" name="orderId" value="${searchId}">
+              ${shopId ? `<input type="hidden" name="shop" value="${shopId}">` : ''}
+              <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Namba ya Simu (Tarakimu 10):</label>
+                <input type="tel" name="phone" placeholder="0712345678" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10)" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:14px;" required>
+              </div>
+              <button type="submit" style="background:#28a745; color:white; border:none; padding:11px; width:100%; font-weight:bold; border-radius:6px; cursor:pointer; font-size:14px;">Thibitisha & Tazama Oda</button>
+            </form>
+          </div>`;
+        } else {
+          const currentStatus = order.status || 'Pending';
+          const existingReview = await db('reviews').where({ orderId: searchId }).first();
+          const allOrderReviews = await db('reviews').where({ orderId: searchId }).select('*');
+          const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
           
-          <div style="margin-top: 12px;">
-            <a href="/admin/order/invoice?id=${order.orderId}" target="_blank" style="background: #007bff; color: white; padding: 10px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">📄 Tazama Risiti Yako (Digital Invoice)</a>
-          </div>
+          let statusBadge = '🟡 Pending (Inashughulikiwa)';
+          if (currentStatus === 'Dispatched') statusBadge = '🚚 Dispatched (Ipo Njiani Kuja)';
+          if (currentStatus === 'Completed') statusBadge = '✅ Completed (Imekamilika)';
 
-          ${reviewSection}
-          ${publicReviewsHtml}
+          let reviewSection = '';
+          if (currentStatus === 'Completed') {
+            if (existingReview) {
+              reviewSection = `
+              <div style="background:#e8f5e9; padding:15px; border-radius:8px; margin-top:15px;">
+                <h4 style="margin:0 0 5px 0; color:#2e7d32;">AHSANTE KWA FEEDBACK YAKO!</h4>
+                <p style="margin:0; font-size:18px;">${'⭐'.repeat(existingReview.rating)}</p>
+                <p style="margin:5px 0 0 0; color:#555;"><em>"${escapeHtml(existingReview.comment)}"</em></p>
+              </div>`;
+            } else {
+              reviewSection = `
+              <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-top:15px; border:1px solid #e9ecef;">
+                <h4 style="margin:0 0 10px 0;">Toa Maoni & Nyota (Review Order)</h4>
+                <form action="/track/review" method="POST">
+                  <input type="hidden" name="orderId" value="${order.orderId}">
+                  <div style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:bold;">Chagua Nyota (Rating):</label>
+                    <select name="rating" style="width:100%; padding:8px; border-radius:4px; margin-top:4px;" required>
+                      <option value="5">⭐⭐⭐⭐⭐ (5/5 - Bora Sana)</option>
+                      <option value="4">⭐⭐⭐⭐ (4/5 - Nzuri)</option>
+                      <option value="3">⭐⭐⭐ (3/5 - Kawaida)</option>
+                      <option value="2">⭐⭐ (2/5 - Vibaya)</option>
+                      <option value="1">⭐ (1/5 - Mbaya Sana)</option>
+                    </select>
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:bold;">Maoni Yako (Comment):</label>
+                    <textarea name="comment" rows="3" style="width:100%; padding:8px; border-radius:4px; box-sizing:border-box;" placeholder="Andika maoni yako..." required></textarea>
+                  </div>
+                  <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 15px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">Tuma Feedback</button>
+                </form>
+              </div>`;
+            }
+          }
 
-          <div style="margin-top: 15px; text-align: center;">
-            <a href="https://wa.me/${botPhone}?text=${reportFraudMsg}" target="_blank" style="color: #dc3545; font-size: 12px; font-weight: bold; text-decoration: underline;">🚨 Ripoti Dhuluma / Tatizo hapa</a>
-          </div>
-        </div>`;
+          let publicReviewsHtml = '';
+          if (allOrderReviews.length > 0) {
+            publicReviewsHtml = `<div style="margin-top: 15px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px;">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📢 Maoni ya Umma (Public Reviews):</h4>` +
+              allOrderReviews.map(r => `<div style="font-size: 13px; border-bottom: 1px solid #f1f3f5; padding-bottom: 6px; margin-bottom: 6px;">
+                <span>${'⭐'.repeat(r.rating)}</span> <span style="color: #666; font-size: 11px;">(${new Date(r.date).toLocaleDateString()})</span><br>
+                <em>"${escapeHtml(r.comment)}"</em>
+              </div>`).join('') + `</div>`;
+          }
+
+          const reportFraudMsg = encodeURIComponent(`🚨 RIPOTI YA DHULUMA / TATIZO:\nNaomba kuripoti oda #${order.orderId} ya bidhaa (${order.productName}) yenye thamani ya TSh ${Number(order.sellingPrice).toLocaleString()}. Tatizo ni: `);
+
+          resultHtml = `
+          <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px; word-break:break-word;">
+            <h3 style="margin:0 0 10px 0; color:#111; font-size:17px;">Oda #${order.orderId} ✅</h3>
+            <p style="margin:5px 0; font-size:14px;"><strong>📦 Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
+            <p style="margin:5px 0; font-size:14px;"><strong>💰 Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p>
+            <p style="margin:5px 0; font-size:14px;"><strong>📍 Eneo:</strong> ${escapeHtml(order.location)}</p>
+            <p style="margin:5px 0; font-size:14px;"><strong>📞 Simu:</strong> ${escapeHtml(order.customerPhone)}</p>
+            <p style="margin:10px 0; padding:8px 12px; background:#f0f0f0; border-radius:6px; display:inline-block; font-weight:bold; font-size:13px;">Status: ${statusBadge}</p>
+            
+            <div style="margin-top: 12px;">
+              <a href="/track/invoice?id=${order.orderId}" target="_blank" style="background: #007bff; color: white; padding: 10px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; width: 100%; text-align: center; box-sizing: border-box;">📄 Tazama Risiti Yako (Digital Invoice)</a>
+            </div>
+
+            ${reviewSection}
+            ${publicReviewsHtml}
+
+            <div style="margin-top: 15px; text-align: center;">
+              <a href="https://wa.me/${botPhone}?text=${reportFraudMsg}" target="_blank" style="color: #dc3545; font-size: 12px; font-weight: bold; text-decoration: underline;">🚨 Ripoti Dhuluma / Tatizo hapa</a>
+            </div>
+          </div>`;
+        }
       } else {
         resultHtml = `<div style="background:#f8d7da; color:#721c24; padding:12px; border-radius:6px; margin-top:20px; text-align:center; font-size:14px;">❌ Hakuna Oda yenye Namba #${searchId}.</div>`;
       }
@@ -920,10 +943,134 @@ app.get('/track', async (req, res) => {
   }
 });
 
+// Handle Phone Verification for Tracking
+app.post('/track/verify', async (req, res) => {
+  try {
+    const { orderId, phone, shop } = req.body;
+    const oid = parseInt(orderId);
+    const inputPhone = (phone || '').trim();
+
+    if (!oid || !inputPhone) {
+      return res.redirect('/track');
+    }
+
+    const order = await db('orders').where({ orderId: oid }).first();
+    if (!order) {
+      return res.redirect('/track');
+    }
+
+    const dbPhone = (order.customerPhone || '').trim().replace(/\D/g, '');
+    const cleanInput = inputPhone.replace(/\D/g, '');
+
+    const isMatch = dbPhone === cleanInput || 
+                    dbPhone.endsWith(cleanInput) || 
+                    cleanInput.endsWith(dbPhone) ||
+                    (dbPhone.startsWith('255') && dbPhone.slice(3) === cleanInput) ||
+                    (cleanInput.startsWith('255') && cleanInput.slice(3) === dbPhone);
+
+    if (isMatch) {
+      if (!req.session.verifiedOrders) {
+        req.session.verifiedOrders = {};
+      }
+      req.session.verifiedOrders[oid] = true;
+    } else {
+      return res.send(`
+        <div style="text-align:center; padding:40px; font-family:sans-serif;">
+          <h3 style="color:#dc3545;">❌ Namba ya Simu Si Sahihi!</h3>
+          <p>Namba uliyoweka hailingani na namba iliyotumika kuweka Oda #${oid}.</p>
+          <a href="/track?id=${oid}${shop ? '&shop=' + shop : ''}" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px; display:inline-block; margin-top:15px;">Jaribu Tena</a>
+        </div>
+      `);
+    }
+
+    res.redirect(`/track?id=${oid}${shop ? '&shop=' + shop : ''}`);
+  } catch (err) {
+    console.error('Track verification error:', err);
+    res.redirect('/track');
+  }
+});
+
+// Secure Customer Invoice Route (Accessible only to verified buyers)
+app.get('/track/invoice', async (req, res) => {
+  try {
+    const orderId = parseInt(req.query.id);
+    if (!orderId) return res.send('❌ Oda haipatikani.');
+
+    const verifiedOrders = req.session.verifiedOrders || {};
+    if (!verifiedOrders[orderId]) {
+      return res.send(`
+        <div style="text-align:center; padding:40px; font-family:sans-serif;">
+          <h3 style="color:#dc3545;">❌ Huna Ruhusa!</h3>
+          <p>Tafadhali thibitisha namba yako ya simu kwanza kwenye ukurasa wa kufuatilia oda kabla ya kutazama risiti.</p>
+          <a href="/track?id=${orderId}" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px; display:inline-block; margin-top:15px;">Fuatilia Oda</a>
+        </div>
+      `);
+    }
+
+    const order = await db('orders').where({ orderId }).first();
+    if (!order) return res.send('❌ Oda haipatikani.');
+
+    const winga = await db('wingas').where({ id: order.wingaId }).first();
+    const shopLink = `${PUBLIC_URL}/catalog?shop=${winga ? winga.id : 1}`;
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="sw">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+      <title>Risiti ya Oda #${order.orderId}</title>
+      <style>
+        body { font-family: monospace; background: #fff; color: #000; padding: 20px; max-width: 420px; margin: 20px auto; border: 1px solid #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-radius: 8px; box-sizing: border-box; }
+        .center { text-align: center; }
+        hr { border: dashed 1px #888; }
+        a { color: #007bff; text-decoration: none; }
+        .btn-print { background: #007bff; color: white; border: none; padding: 12px; width: 100%; cursor: pointer; font-weight: bold; margin-top: 20px; border-radius: 6px; font-size: 15px; }
+        @media print { 
+          body { border: none; box-shadow: none; padding: 0; margin: 0; max-width: 100%; }
+          .btn-print { display: none; } 
+        }
+      </style>
+    </head>
+    <body>
+      <div class="center">
+        <h2>🛍️ ${escapeHtml(winga ? winga.name : 'Winga Shop')}</h2>
+        <p>Simu: ${escapeHtml(winga ? winga.phone : '-')}</p>
+        <p style="font-size: 12px; word-break: break-all;">Link ya Duka:<br><a href="${shopLink}" target="_blank">${shopLink}</a></p>
+        <hr>
+        <h3>RISITI YA MAUZO (INVOICE)</h3>
+      </div>
+      <p><strong>Namba ya Oda:</strong> #${order.orderId}</p>
+      <p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p>
+      <p><strong>Mteja Simu:</strong> ${escapeHtml(order.customerPhone)}</p>
+      <p><strong>Eneo la Mteja:</strong> ${escapeHtml(order.location)}</p>
+      <hr>
+      <p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p>
+      <p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || order.price || 0).toLocaleString()}</p>
+      <hr>
+      <p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p class="center" style="margin-top: 20px; font-size: 13px;"><em>Asante kwa kununua nasi! Karibu tena.</em></p>
+      <button class="btn-print" onclick="window.print()">🖨️ Chapisha / Hifadhi kama PDF</button>
+    </body>
+    </html>
+    `);
+  } catch (err) {
+    console.error('Customer Invoice generation error:', err);
+    res.status(500).send('Hitilafu kwenye mfumo wa risiti.');
+  }
+});
+
 app.post('/track/review', async (req, res) => {
   try {
     const { orderId, rating, comment } = req.body;
     const oid = parseInt(orderId);
+    
+    // Ensure customer is verified for this order before allowing review submission
+    const verifiedOrders = req.session.verifiedOrders || {};
+    if (!verifiedOrders[oid]) {
+      return res.redirect(`/track?id=${oid}`);
+    }
+
     const existing = await db('reviews').where({ orderId: oid }).first();
     if (existing) {
       await db('reviews').where({ orderId: oid }).update({
