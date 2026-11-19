@@ -1,5 +1,4 @@
-with open('index.js', 'w', encoding='utf-8') as f:
-    f.write(r"""require('dotenv').config();
+require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
@@ -99,7 +98,7 @@ app.use(session({
 
 app.use('/api', orderRoutes);
 
-// Multer Memory Storage (Max 10MB per image, max 4 images)
+// #7: Multer Memory Storage (Max 10MB per image, max 4 images)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -232,7 +231,7 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      // Support Single & Multiple Orders (!agiza or !order)
+      // #6 & #8: Support Single & Multiple Orders (!agiza or !order) without false "haipo"
       if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
         let location = 'Haikutajwa';
         let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
@@ -243,7 +242,7 @@ async function connectToWhatsApp() {
         const firstLine = lines[0] || '';
         const afterCommand = firstLine.replace(/^!(agiza|order)\s*/i, '').trim();
 
-        if (afterCommand.includes('|') && !afterCommand.startsWith('ITEM')) {
+        if (afterCommand.includes('|') && !afterCommand.toUpperCase().startsWith('ITEM')) {
           const payload = afterCommand.split('|');
           const pid = parseInt(payload[0].trim(), 10);
           if (!isNaN(pid)) orderItems.push({ id: pid, size: 'Standard', color: 'Kama pichani', qty: 1 });
@@ -396,8 +395,8 @@ async function connectToWhatsApp() {
   });
 }
 
-// Broadcast new product to previous shop customers (with product details + 1h anti-spam cooldown)
-async function notifyShopCustomers(winga, newProduct) {
+// #5: Broadcast new product to previous shop customers (short text-only + 1h anti-spam cooldown per shop)
+async function notifyShopCustomers(winga) {
   try {
     if (!isWhatsappReady || !sock) return;
 
@@ -413,27 +412,15 @@ async function notifyShopCustomers(winga, newProduct) {
     if (customerJids.length === 0) return;
 
     shopBroadcastCooldown.set(winga.id, now);
-    const images = newProduct ? getProductImages(newProduct) : [];
 
-    const alertMsg = newProduct
-      ? `📢 *TAARIFA ZA BIDHAA MPYA!* 🛍️\n` +
-        `-----------------------------------\n` +
-        `Duka la *${winga.name}* limeongeza mzigo mpya sokoni!\n\n` +
-        `📦 *Bidhaa:* ${newProduct.name}\n` +
-        `💰 *Bei:* TSh ${Number(newProduct.sellingPrice || 0).toLocaleString()}\n` +
-        `📁 *Aina:* ${newProduct.category || 'General'}\n\n` +
-        `🔗 *Tazama bidhaa zote hapa:*\n${PUBLIC_URL}/catalog?shop=${winga.id}`
-      : `📢 *Bidhaa Mpya Dukani!*\n` +
-        `Duka la *${winga.name}* limeongeza mizigo mipya leo.\n` +
-        `Tazama hapa: ${PUBLIC_URL}/catalog?shop=${winga.id}`;
+    const alertMsg =
+      `📢 *Bidhaa Mpya Dukani!*\n` +
+      `Duka la *${winga.name}* limeongeza bidhaa mpya leo.\n` +
+      `Tazama hapa: ${PUBLIC_URL}/catalog?shop=${winga.id}`;
 
     for (const jid of customerJids) {
       try {
-        if (images.length > 0 && images[0]) {
-          await sock.sendMessage(jid, { image: { url: images[0] }, caption: alertMsg });
-        } else {
-          await sock.sendMessage(jid, { text: alertMsg });
-        }
+        await sock.sendMessage(jid, { text: alertMsg });
       } catch (sendErr) {
         console.error(`Failed sending broadcast to ${jid}:`, sendErr.message);
       }
@@ -473,7 +460,7 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Public Catalog Route (Full Features: Language Switcher, Help/About, Lightbox, Product Details & Reviews, Multi-Order Cart, Full TZ Location)
+// Public Catalog Route (#1, #2, #3, #4, #6)
 app.get('/catalog', async (req, res) => {
   try {
     await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
@@ -689,7 +676,7 @@ app.get('/catalog', async (req, res) => {
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
-      <!-- Product Details & Customer Feedback Modal -->
+      <!-- #4: Product Details & Customer Feedback Modal -->
       <div id="detailsModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="document.getElementById('detailsModal').style.display='none'">&times;</button>
@@ -697,7 +684,7 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Order / Add-to-Cart Modal -->
+      <!-- #2 & #6: Order / Add-to-Cart Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button class="close-btn" onclick="document.getElementById('orderModal').style.display='none'">&times;</button>
@@ -892,8 +879,10 @@ app.get('/catalog', async (req, res) => {
         function closeImgModal() { document.getElementById('fullImgModal').style.display = 'none'; }
 
         window.addEventListener('DOMContentLoaded', () => {
-          window.initTzLocation('custRegion', 'custDistrict', 'custWard', 'custStreet', 'custCustomStreet');
-          window.initTzLocation('cartRegion', 'cartDistrict', 'cartWard', 'cartStreet', 'cartCustomStreet');
+          if (typeof window.initTzLocation === 'function') {
+            window.initTzLocation('custRegion', 'custDistrict', 'custWard', 'custStreet', 'custCustomStreet');
+            window.initTzLocation('cartRegion', 'cartDistrict', 'cartWard', 'cartStreet', 'cartCustomStreet');
+          }
           updateCartBadges();
           applyLanguage();
         });
@@ -1318,7 +1307,7 @@ app.post('/track/review', async (req, res) => {
   }
 });
 
-// Login & Registration (with Eye Password Toggle + Full Tanzania Locations)
+// Login & Registration (#1 & #3: Full Tanzania Locations)
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -1470,7 +1459,9 @@ app.get('/register', (req, res) => {
         }
       }
       window.addEventListener('DOMContentLoaded', () => {
-        window.initTzLocation('regRegion', 'regDistrict', 'regWard', 'regStreet', 'regCustomStreet');
+        if (typeof window.initTzLocation === 'function') {
+          window.initTzLocation('regRegion', 'regDistrict', 'regWard', 'regStreet', 'regCustomStreet');
+        }
       });
     </script>
   </body>
@@ -1527,7 +1518,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Seller Dashboard (/admin) - Complete with Subscription Banner, Language Switcher, Help Modal, Password Eye Toggles, Multi-Color & New Layout
+// Seller Dashboard (/admin) - #2, #7, #8, #9
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1616,6 +1607,7 @@ app.get('/admin', requireWinga, async (req, res) => {
     const shopUrl = `${PUBLIC_URL}/catalog?shop=${currentWingaId}`;
     const shareWhatsAppText = encodeURIComponent(`Habari! Karibu utazame bidhaa na uagize kupitia duka langu hapa:\n${shopUrl}`);
 
+    // #8: Match order photo using productId first (with fallback to name)
     let orderRows = orders.map(o => {
       const currentStatus = o.status || 'Pending';
       const rev = reviews.find(r => r.orderId === o.orderId);
@@ -1624,10 +1616,8 @@ app.get('/admin', requireWinga, async (req, res) => {
       if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
 
       const baseOrderProductName = (o.productName || '').split('(')[0].trim().toLowerCase();
-      const matchedProduct = products.find(p =>
-        (o.productId && Number(p.id) === Number(o.productId)) ||
-        (p.name && p.name.trim().toLowerCase() === baseOrderProductName)
-      );
+      const matchedProduct = (o.productId ? products.find(p => Number(p.id) === Number(o.productId)) : null) ||
+        products.find(p => p.name && p.name.trim().toLowerCase() === baseOrderProductName);
 
       let productImgHtml = '📦';
       if (matchedProduct) {
@@ -2075,7 +2065,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   }
 });
 
-// Add Product with Cloudinary Upload & Multi-Color Support
+// #2, #5, #7: Add Product with Cloudinary Upload, Real Error Reason & Multi-Color Support
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -2129,7 +2119,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
 
       const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
       if (currentWinga) {
-        notifyShopCustomers(currentWinga, newProductData).catch(e => console.error('Broadcast err:', e));
+        notifyShopCustomers(currentWinga).catch(e => console.error('Broadcast err:', e));
       }
       res.redirect('/admin?added=true');
     } catch (dbErr) {
@@ -2205,7 +2195,7 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password (with Eye Password Toggle)
+// Forgot & Reset Password
 app.get('/forgot-password', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:320px;"><h2>🔑 Umesahau Nenosiri?</h2><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;">← Rudi Login</a></div></body></html>`);
 });
@@ -2285,7 +2275,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Dashboard (Full Features + SMS Badge + Image Zoom Modal + Full TZ Location)
+// Super Admin Dashboard (#1 & #3: Full Tanzania Locations + SMS & Winga Management)
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -2468,7 +2458,9 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
         function openModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imgModal').style.display = 'flex'; }
         function closeModal() { document.getElementById('imgModal').style.display = 'none'; }
         window.addEventListener('DOMContentLoaded', () => {
-          window.initTzLocation('saRegion', 'saDistrict', 'saWard', 'saStreet', 'saCustomStreet');
+          if (typeof window.initTzLocation === 'function') {
+            window.initTzLocation('saRegion', 'saDistrict', 'saWard', 'saStreet', 'saCustomStreet');
+          }
         });
       </script>
     </body>
