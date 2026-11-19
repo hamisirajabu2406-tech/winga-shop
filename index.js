@@ -39,6 +39,248 @@ app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// Dynamic /tz-locations.js fallback if not present in public/
+app.get('/tz-locations.js', (req, res, next) => {
+  const staticLocPath = path.join(__dirname, 'public', 'tz-locations.js');
+  if (fs.existsSync(staticLocPath)) {
+    return next();
+  }
+  res.type('application/javascript').send(`
+    (function() {
+      const TZ_DATA = {
+        "Dar es Salaam": {
+          "Kinondoni": {
+            "Kinondoni": ["Ada Estate", "Mkwajuni", "Hananasif", "Kambangwa"],
+            "Msasani": ["Masaki", "Oysterbay", "Mikocheni A", "Mikocheni B"],
+            "Kawe": ["Mzimuni", "Ukwamani", "Tangibovu", "Kawe Beach"],
+            "Mbezi Juu": ["Mbezi Beach", "Tanki Bovu", "Kijitonyama"],
+            "Magomeni": ["Magomeni Mwembechai", "Makumbusho", "Dsm Road"]
+          },
+          "Ilala": {
+            "Kariakoo": ["Kariakoo Mashariki", "Kariakoo Magharibi", "Gerezani"],
+            "Kisutu": ["Kisutu", "Upanga Mashariki", "Upanga Maghariki"],
+            "Buguruni": ["Buguruni Malapa", "Kisiwani", "Mnyamani"],
+            "Tabata": ["Tabata Kimanga", "Tabata Segerea", "Tabata Relini"],
+            "Ukonga": ["Ukonga Mazizini", "Gongo la Mboto", "Pugu"]
+          },
+          "Temeke": {
+            "Temeke": ["Temeke Wailes", "Yombo Vituka", "Sandali"],
+            "Mbagala": ["Mbagala Kuu", "Mbagala Charambe", "Kizinga"],
+            "Chang'ombe": ["Chang'ombe A", "Chang'ombe B", "Keko"],
+            "Tandika": ["Tandika", "Kurasini", "Azimio"]
+          },
+          "Ubungo": {
+            "Ubungo": ["Ubungo Kibo", "Msewe", "Riverside", "Makuburi"],
+            "Sinza": ["Sinza Mori", "Sinza Palestina", "Sinza Vatican"],
+            "Kimara": ["Kimara Baruti", "Kimara Stop Over", "Mbezi Luis"],
+            "Manzese": ["Manzese Uzuri", "Manzese Argentina", "Mianzini"]
+          },
+          "Kigamboni": {
+            "Kigamboni": ["Feri", "Kigamboni", "Tungi", "Mjimwema"],
+            " Vijibweni": ["Vijibweni", "Gezaulole", "Kimbiji"]
+          }
+        },
+        "Arusha": {
+          "Arusha Mjini": {
+            "Kati": ["Soko Kuu", "Clock Tower", "Sanawari"],
+            "Sekei": ["Sekei", "Unga Limited", "Levolosi"],
+            "Themi": ["Themi", "Kaloleni", "Ngarenaro"]
+          },
+          "Arumeru": {
+            "Usa River": ["Usa River", "Ngyani", "Tengeru"],
+            "Poli": ["Poli", "King'ori", "Kikatiti"]
+          },
+          "Karatu": { "Karatu": ["Karatu Mjini", "Endabash", "Mang'ola"] },
+          "Longido": { "Longido": ["Longido", "Namanga", "Engarenaibor"] },
+          "Ngorongoro": { "Loliondo": ["Loliondo", "Wasso", "Ngorongoro"] },
+          "Monduli": { "Monduli Juu": ["Monduli Mjini", "Makuyuni", "Mto wa Mbu"] }
+        },
+        "Dodoma": {
+          "Dodoma Mjini": {
+            "Majengo": ["Majengo", "Kikuyu", "Chang'ombe Dodoma"],
+            "Uhuru": ["Uhuru", "Viwandani", "Area C", "Area D"],
+            "Dodoma Makulu": ["Dodoma Makulu", "Nzuguni", "Iyumbu"]
+          },
+          "Bahi": { "Bahi": ["Bahi", "Chipanga", "Mpinga"] },
+          "Chamwino": { "Chamwino": ["Chamwino Ikulu", "Buigiri", "Mlowa"] },
+          "Chemba": { "Chemba": ["Chemba", "Farkwa", "Goima"] },
+          "Kondoa": { "Kondoa Mjini": ["Kondoa", "Busi", "Kolo"] },
+          "Kongwa": { "Kibaigwa": ["Kibaigwa", "Kongwa Mjini", "Sagala"] },
+          "Mpwapwa": { "Mpwapwa": ["Mpwapwa Mjini", "Kibakwe", "Godegode"] }
+        },
+        "Mwanza": {
+          "Nyamagana": {
+            "Pamba": ["Pamba", "Mbugani", "Mirongo"],
+            "Mkuyuni": ["Mkuyuni", "Isamilo", "Nyegezi"]
+          },
+          "Ilemela": {
+            "Kirumba": ["Kirumba", "Nyakato", "Buswelu", "Ibanda"]
+          },
+          "Magu": { "Magu Mjini": ["Magu", "Kisesa", "Kahangara"] },
+          "Misungwi": { "Misungwi": ["Misungwi", "Usagara", "Koromije"] },
+          "Sengerema": { "Sengerema": ["Sengerema Mjini", "Nyampulukano", "Tabaruka"] },
+          "Ukerewe": { "Nansio": ["Nansio", "Kagunguli", "Muriti"] },
+          "Kwimba": { "Ngudu": ["Ngudu", "Sumve", "Mwandoya"] }
+        },
+        "Mbeya": {
+          "Mbeya Mjini": {
+            "Mwanjelwa": ["Mwanjelwa", "Sinde", "Forest", "Nonde"],
+            "Uyole": ["Uyole", "Iwambi", "Isyesye"]
+          },
+          "Mbeya Vijijini": { "Inyala": ["Inyala", "Mbalizi", "Santilya"] },
+          "Rungwe": { "Tukuyu": ["Tukuyu Mjini", "Kiwira", "Masoko"] },
+          "Kyela": { "Kyela": ["Kyela Mjini", "Kasumulu", "Ipinda"] },
+          "Mbozi": { "Mbozi": ["Mbozi", "Idiwi", "Halungu"] },
+          "Chunya": { "Chunya": ["Chunya", "Lupa", "Mkwajuni Chunya"] }
+        },
+        "Kilimanjaro": {
+          "Moshi Mjini": {
+            "Majengo Moshi": ["Majengo", "Pasua", "Kiboriloni", "Soweto"]
+          },
+          "Moshi Vijijini": { "Himo": ["Himo", "Marangu", "Old Moshi"] },
+          "Hai": { "Bomang'ombe": ["Bomang'ombe", "Machame", "Sanya Juu"] },
+          "Rombo": { "Mkuu": ["Mkuu", "Tarakea", "Mashati"] },
+          "Mwanga": { "Mwanga": ["Mwanga", "Lembeni", "Usangi"] },
+          "Same": { "Same": ["Same", "Hedaru", "Maore"] },
+          "Siha": { "Siha Kati": ["Siha", "Sanya", "Namwai"] }
+        },
+        "Tanga": {
+          "Tanga Mjini": { "Ngamiani": ["Ngamiani Kati", "Chumbageni", "Nguvumali", "Msambweni"] },
+          "Muheza": { "Muheza": ["Muheza", "Amani", "Lusotho"] },
+          "Korogwe": { "Korogwe": ["Korogwe Mjini", "Mombo", "Magoma"] },
+          "Handeni": { "Chanika Handeni": ["Handeni Mjini", "Kibera", "Kwachaga"] },
+          "Pangani": { "Pangani": ["Pangani Mashariki", "Bweni", "Mwera"] },
+          "Lushoto": { "Lushoto": ["Lushoto Mjini", "Mlalo", "Soni"] },
+          "Kilindi": { "Songe": ["Songe", "Kilindi", "Kwediboma"] }
+        },
+        "Morogoro": {
+          "Morogoro Mjini": { "Mji Mkuu": ["Kichangani", "Mwembesongo", "Msamvu", "Mazimbu"] },
+          "Morogoro Vijijini": { "Mkuyuni": ["Mkuyuni", "Kisaki", "Tawa"] },
+          "Kilombero": { "Ifakara": ["Ifakara", "Mngeta", "Mang'ula"] },
+          "Kilosa": { "Kilosa": ["Kilosa Mjini", "Mikumi", "Kimamba"] },
+          "Ulanga": { "Mahenge": ["Mahenge", "Lupiro", "Vigoi"] },
+          "Gairo": { "Gairo": ["Gairo", "Chagongwe", "Rubeho"] },
+          "Malinyi": { "Malinyi": ["Malinyi", "Mtimbira", "Igawa"] }
+        }
+      };
+
+      const ALL_REGIONS = [
+        "Arusha", "Dar es Salaam", "Dodoma", "Geita", "Iringa", "Kagera", "Katavi",
+        "Kigoma", "Kilimanjaro", "Lindi", "Manyara", "Mara", "Mbeya", "Morogoro",
+        "Mtwara", "Mwanza", "Njombe", "Pemba Kaskazini", "Pemba Kusini", "Pwani",
+        "Rukwa", "Ruvuma", "Shinyanga", "Simiyu", "Singida", "Songwe", "Tabora",
+        "Tanga", "Unguja Kaskazini", "Unguja Kusini", "Mjini Magharibi"
+      ];
+
+      const DEFAULT_DISTRICTS = {
+        "Geita": ["Geita Mjini", "Chato", "Bukombe", "Mbogwe", "Nyang'hwale"],
+        "Iringa": ["Iringa Mjini", "Iringa Vijijini", "Kilolo", "Mufindi"],
+        "Kagera": ["Bukoba Mjini", "Bukoba Vijijini", "Muleba", "Karagwe", "Ngara", "Biharamulo"],
+        "Katavi": ["Mpanda Mjini", "Mlele", "Tanganyika"],
+        "Kigoma": ["Kigoma Ujiji", "Kasulu", "Kibondo", "Buhigwe", "Uvinza", "Kakonko"],
+        "Lindi": ["Lindi Mjini", "Kilwa", "Nachingwea", "Liwale", "Ruangwa"],
+        "Manyara": ["Babati", "Hanang", "Mbulu", "Kiteto", "Simanjiro"],
+        "Mara": ["Musoma Mjini", "Tarime", "Serengeti", "Bunda", "Rorya", "Butiama"],
+        "Mtwara": ["Mtwara Mjini", "Masasi", "Newala", "Tandahimba", "Nanyumbu"],
+        "Njombe": ["Njombe Mjini", "Makambako", "Wanging'ombe", "Ludewa", "Makete"],
+        "Pemba Kaskazini": ["Wete", "Micheweni"],
+        "Pemba Kusini": ["Chake Chake", "Mkoani"],
+        "Pwani": ["Kibaha", "Bagamoyo", "Kisarawe", "Mkuranga", "Rufiji", "Mafia"],
+        "Rukwa": ["Sumbawanga Mjini", "Kalambo", "Nkasi"],
+        "Ruvuma": ["Songea Mjini", "Mbinga", "Tunduru", "Namtumbo", "Nyasa"],
+        "Shinyanga": ["Shinyanga Mjini", "Kahama", "Kishapu"],
+        "Simiyu": ["Bariadi", "Maswa", "Meatu", "Itilima", "Busega"],
+        "Singida": ["Singida Mjini", "Iramba", "Manyoni", "Ikungi", "Mkalama"],
+        "Songwe": ["Vwawa (Mbozi)", "Tunduma", "Ileje", "Momba", "Songwe"],
+        "Tabora": ["Tabora Mjini", "Igunga", "Nzega", "Urambo", "Sikonge", "Kaliua"],
+        "Unguja Kaskazini": ["Kaskazini A", "Kaskazini B"],
+        "Unguja Kusini": ["Kati", "Kusini"],
+        "Mjini Magharibi": ["Mjini", "Magharibi A", "Magharibi B"]
+      };
+
+      window.initTzLocation = function(regId, distId, wardId, streetId, customStreetId) {
+        const rEl = document.getElementById(regId);
+        const dEl = document.getElementById(distId);
+        const wEl = document.getElementById(wardId);
+        const sEl = document.getElementById(streetId);
+        const cEl = document.getElementById(customStreetId);
+        if (!rEl || !dEl || !wEl || !sEl) return;
+
+        rEl.innerHTML = '<option value="">-- Chagua Mkoa --</option>' +
+          ALL_REGIONS.map(r => '<option value="' + r + '">' + r + '</option>').join('');
+        dEl.innerHTML = '<option value="">-- Kwanza Chagua Mkoa --</option>';
+        wEl.innerHTML = '<option value="">-- Kwanza Chagua Wilaya --</option>';
+        sEl.innerHTML = '<option value="">-- Kwanza Chagua Kata --</option>';
+
+        function populateWards(reg, dist) {
+          const regObj = TZ_DATA[reg];
+          const wards = (regObj && regObj[dist]) ? Object.keys(regObj[dist]) : [];
+          let opts = '<option value="">-- Chagua Kata --</option>';
+          wards.forEach(w => {
+            opts += '<option value="' + w + '">' + w + '</option>';
+          });
+          opts += '<option value="Kata Kuu">Kata Kuu</option>';
+          opts += '<option value="__OTHER_WARD__">Kata Nyingine (Andika)</option>';
+          wEl.innerHTML = opts;
+          sEl.innerHTML = '<option value="">-- Chagua Mtaa / Kijiji --</option><option value="__OTHER__">Mtaa / Kijiji Kingine (Andika)</option>';
+        }
+
+        function populateStreets(reg, dist, ward) {
+          const regObj = TZ_DATA[reg];
+          const streets = (regObj && regObj[dist] && regObj[dist][ward]) ? regObj[dist][ward] : [];
+          let opts = '<option value="">-- Chagua Mtaa / Kijiji --</option>';
+          streets.forEach(st => {
+            opts += '<option value="' + st + '">' + st + '</option>';
+          });
+          opts += '<option value="__OTHER__">Mtaa / Kijiji Kingine (Andika)</option>';
+          sEl.innerHTML = opts;
+        }
+
+        rEl.addEventListener('change', function() {
+          const reg = this.value;
+          if (!reg) {
+            dEl.innerHTML = '<option value="">-- Kwanza Chagua Mkoa --</option>';
+            return;
+          }
+          const dists = TZ_DATA[reg] ? Object.keys(TZ_DATA[reg]) : (DEFAULT_DISTRICTS[reg] || []);
+          dEl.innerHTML = '<option value="">-- Chagua Wilaya --</option>' +
+            dists.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+          wEl.innerHTML = '<option value="">-- Kwanza Chagua Wilaya --</option>';
+          sEl.innerHTML = '<option value="">-- Kwanza Chagua Kata --</option>';
+          if (cEl) cEl.style.display = 'none';
+        });
+
+        dEl.addEventListener('change', function() {
+          populateWards(rEl.value, this.value);
+          if (cEl) cEl.style.display = 'none';
+        });
+
+        wEl.addEventListener('change', function() {
+          if (this.value === '__OTHER_WARD__') {
+            sEl.innerHTML = '<option value="__OTHER__">Andika Mtaa / Kijiji</option>';
+            if (cEl) {
+              cEl.style.display = 'block';
+              cEl.placeholder = 'Andika Kata, kisha Mtaa (mf: Kata ya Mtaa, Mtaa fulani)...';
+            }
+          } else {
+            populateStreets(rEl.value, dEl.value, this.value);
+            if (cEl) {
+              cEl.style.display = 'none';
+              cEl.placeholder = 'Andika jina la mtaa / kijiji...';
+            }
+          }
+        });
+
+        sEl.addEventListener('change', function() {
+          if (cEl) {
+            cEl.style.display = (this.value === '__OTHER__' || wEl.value === '__OTHER_WARD__') ? 'block' : 'none';
+          }
+        });
+      };
+    })();
+  `);
+});
+
 // Landing Page with Contact Us & About Us
 app.get(['/', '/index.html'], (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
@@ -187,8 +429,9 @@ function escapeHtml(str) {
 }
 
 function buildLocationString(region, district, ward, street, customStreet) {
-  const finalStreet = (street === '__OTHER__' ? (customStreet || '') : (street || '')).trim();
-  return [finalStreet, (ward || '').trim(), (district || '').trim(), (region || '').trim()]
+  const cleanWard = ward === '__OTHER_WARD__' ? '' : (ward || '').trim();
+  const finalStreet = (street === '__OTHER__' || ward === '__OTHER_WARD__' ? (customStreet || '') : (street || '')).trim();
+  return [finalStreet, cleanWard, (district || '').trim(), (region || '').trim()]
     .filter(Boolean)
     .join(', ');
 }
@@ -199,9 +442,44 @@ function findMatchedProductForOrder(order, productsList) {
     const byId = productsList.find(p => Number(p.id) === Number(order.productId));
     if (byId) return byId;
   }
-  const baseName = (order.productName || '').split('(')[0].trim().toLowerCase();
-  if (!baseName) return null;
-  return productsList.find(p => p.name && p.name.trim().toLowerCase() === baseName) || null;
+  const rawName = (order.productName || '').trim().toLowerCase();
+  if (!rawName) return null;
+  const baseName = rawName.split('(')[0].trim();
+  return (
+    productsList.find(p => p.name && p.name.trim().toLowerCase() === baseName) ||
+    productsList.find(p => p.name && rawName.startsWith(p.name.trim().toLowerCase())) ||
+    null
+  );
+}
+
+async function insertOrderSafe(orderObj) {
+  try {
+    await db('orders').insert(orderObj);
+  } catch (err) {
+    if (orderObj.productId !== undefined && /productId|Unknown column/i.test(err.message || '')) {
+      const fallbackObj = { ...orderObj };
+      delete fallbackObj.productId;
+      await db('orders').insert(fallbackObj);
+    } else {
+      throw err;
+    }
+  }
+}
+
+function extractIncomingText(msg) {
+  if (!msg || !msg.message) return '';
+  let m = msg.message;
+  if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+  if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+  if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+  if (m.editedMessage?.message) m = m.editedMessage.message;
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    ''
+  ).trim();
 }
 
 // Initialize Baileys WhatsApp Connection
@@ -239,7 +517,8 @@ async function connectToWhatsApp() {
       if (!msg.message || msg.key.fromMe) continue;
 
       const remoteJid = msg.key.remoteJid;
-      const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+      const text = extractIncomingText(msg);
+      if (!text) continue;
       const lowerText = text.toLowerCase();
 
       if (lowerText.startsWith('!maoni')) {
@@ -283,27 +562,28 @@ async function connectToWhatsApp() {
           if (payload[1]) location = payload[1].trim();
           if (payload[2]) phone = payload[2].trim();
         } else {
-          const directIds = afterCommand.split(',').map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+          const idMatches = afterCommand.match(/\d+/g) || [];
+          const directIds = idMatches.map(x => parseInt(x, 10)).filter(n => !isNaN(n) && n > 0);
           let defaultSize = 'Standard';
           let defaultColor = 'Kama pichani';
           let defaultQty = 1;
 
           for (const line of lines.slice(1)) {
             const lower = line.toLowerCase();
-            if (lower.startsWith('simu:')) {
+            if (lower.includes('simu:')) {
               const val = line.split(/simu:/i)[1].trim();
               if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
-            } else if (lower.startsWith('eneo:')) {
+            } else if (lower.includes('eneo:')) {
               const val = line.split(/eneo:/i)[1].trim();
               if (val && val.toLowerCase() !== 'haikutajwa') location = val;
-            } else if (lower.startsWith('maelezo:')) {
+            } else if (lower.includes('maelezo:')) {
               const val = line.split(/maelezo:/i)[1].trim();
               if (val && val.toLowerCase() !== 'hakuna') notes = val;
-            } else if (lower.startsWith('saizi:') || lower.startsWith('size:')) {
+            } else if (lower.includes('saizi:') || lower.includes('size:')) {
               defaultSize = line.split(/saizi:|size:/i)[1].trim() || 'Standard';
-            } else if (lower.startsWith('rangi:') || lower.startsWith('color:')) {
+            } else if (lower.includes('rangi:') || lower.includes('color:')) {
               defaultColor = line.split(/rangi:|color:/i)[1].trim() || 'Kama pichani';
-            } else if (lower.startsWith('idadi:')) {
+            } else if (lower.includes('idadi:')) {
               const q = parseInt(line.split(/idadi:/i)[1].trim(), 10);
               if (!isNaN(q) && q > 0) defaultQty = q;
             } else if (/^item\s*\d*\s*:/i.test(line)) {
@@ -360,8 +640,9 @@ async function connectToWhatsApp() {
           if (notes) extras.push(`Maelezo: ${notes}`);
           if (extras.length > 0) detailsSummary += ` (${extras.join(', ')})`;
 
-          const maxResult = await db('orders').max('orderId as maxId').first();
-          const nextOrderId = (maxResult && maxResult.maxId ? Number(maxResult.maxId) : 0) + 1;
+          const maxRows = await db('orders').max('orderId as maxId');
+          const rawMax = maxRows && maxRows[0] ? (maxRows[0].maxId ?? Object.values(maxRows[0])[0]) : 0;
+          const nextOrderId = (rawMax ? Number(rawMax) : 0) + 1;
 
           const newOrder = {
             orderId: nextOrderId,
@@ -377,7 +658,7 @@ async function connectToWhatsApp() {
             date: new Date()
           };
 
-          await db('orders').insert(newOrder);
+          await insertOrderSafe(newOrder);
           createdReceipts.push({ order: newOrder, product });
 
           await notifyWinga(newOrder, product);
@@ -429,14 +710,15 @@ async function connectToWhatsApp() {
   });
 }
 
+// Short text-only notification, once per 24 hours per shop (no image, no spam)
 async function notifyShopCustomers(winga) {
   try {
-    if (!isWhatsappReady || !sock) return;
+    if (!isWhatsappReady || !sock || !winga) return;
 
     const now = Date.now();
     const lastSent = shopBroadcastCooldown.get(winga.id) || 0;
-    const ONE_HOUR = 60 * 60 * 1000;
-    if (now - lastSent < ONE_HOUR) {
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    if (now - lastSent < TWENTY_FOUR_HOURS) {
       return;
     }
 
@@ -447,8 +729,7 @@ async function notifyShopCustomers(winga) {
     shopBroadcastCooldown.set(winga.id, now);
 
     const alertMsg =
-      `📢 *Bidhaa Mpya Dukani!*\n` +
-      `Duka la *${winga.name}* limeongeza bidhaa mpya leo.\n` +
+      `📢 Duka la *${winga.name}* limeongeza bidhaa mpya leo.\n` +
       `Tazama hapa: ${PUBLIC_URL}/catalog?shop=${winga.id}`;
 
     for (const jid of customerJids) {
@@ -493,21 +774,26 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Public Catalog Route (#1 Fix: Reliable data-* attributes & JS handlers)
+// Public Catalog Route with Details Modal, Customer Reviews, Multi-Color Selection & Cart
 app.get('/catalog', async (req, res) => {
   try {
-    await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
+    try {
+      await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
+    } catch (statErr) {
+      console.warn('Stats increment skipped:', statErr.message);
+    }
+
     const allProducts = await db('products').select('*');
     const wingas = await db('wingas').select('*');
     const allOrders = await db('orders').select('*');
     const allReviews = await db('reviews').select('*');
 
-    const shopId = req.query.shop;
+    const shopId = req.query.shop ? parseInt(req.query.shop, 10) : null;
     let products = allProducts;
     let shopName = "Soko Letu (All Shops)";
     if (shopId) {
-      products = allProducts.filter(p => p.wingaId === parseInt(shopId, 10));
-      const matchedWinga = wingas.find(w => w.id === parseInt(shopId, 10));
+      products = allProducts.filter(p => Number(p.wingaId) === shopId);
+      const matchedWinga = wingas.find(w => Number(w.id) === shopId);
       if (matchedWinga) {
         shopName = `🛍️ Duka la ${matchedWinga.name}`;
       } else {
@@ -518,10 +804,12 @@ app.get('/catalog', async (req, res) => {
 
     const trackBtnUrl = shopId ? `/track?shop=${shopId}` : '/track';
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
-    const categories = [...new Set(allProducts.map(p => (p.category || 'General').trim()))];
+    const categories = [...new Set(allProducts.map(p => (p.category || 'General').trim()).filter(Boolean))];
 
-    let categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
-    let shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId == w.id ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
+    const categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
+    const shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId === Number(w.id) ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
+
+    const catalogProductsMap = {};
 
     let productCards = products.map(p => {
       const sellingPrice = Number(p.sellingPrice || p.price || 0);
@@ -533,11 +821,11 @@ app.get('/catalog', async (req, res) => {
       const categoryStr = (p.category || 'General').trim();
       const availableSizes = (p.size || 'Standard').trim();
       const availableColors = (p.colors || 'Kama pichani').trim();
-      const matchedWinga = wingas.find(w => w.id === p.wingaId);
+      const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
       const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
       const sellerLocation = matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
 
-      const shopOrderIds = allOrders.filter(o => o.wingaId === p.wingaId).map(o => o.orderId);
+      const shopOrderIds = allOrders.filter(o => Number(o.wingaId) === Number(p.wingaId)).map(o => o.orderId);
       const productOrderIds = allOrders.filter(o => Number(o.productId) === Number(p.id)).map(o => o.orderId);
       const prodReviews = allReviews.filter(r => productOrderIds.includes(r.orderId));
       const shopReviews = allReviews.filter(r => shopOrderIds.includes(r.orderId));
@@ -545,9 +833,8 @@ app.get('/catalog', async (req, res) => {
       const avgRating = activeReviews.length > 0
         ? (activeReviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) / activeReviews.length).toFixed(1)
         : null;
-      const completedShopSales = allOrders.filter(o => o.wingaId === p.wingaId && o.status === 'Completed').length;
 
-      const payloadObj = {
+      catalogProductsMap[p.id] = {
         id: p.id,
         name: p.name,
         priceNum: sellingPrice,
@@ -558,15 +845,13 @@ app.get('/catalog', async (req, res) => {
         images: imageList,
         sellerName,
         sellerLocation,
-        completedSales: completedShopSales,
         avgRating,
-        reviews: activeReviews.slice(0, 10).map(r => ({
+        reviews: activeReviews.slice(0, 15).map(r => ({
           rating: r.rating,
           comment: r.comment,
           date: r.date ? new Date(r.date).toLocaleDateString('sw-TZ') : ''
         }))
       };
-      const safeDataAttr = escapeHtml(JSON.stringify(payloadObj));
 
       let galleryThumbnailsHtml = '';
       if (imageList.length > 1) {
@@ -576,36 +861,36 @@ app.get('/catalog', async (req, res) => {
       }
 
       const imageHtml = mainImage
-        ? `<div class="prod-img-wrap" data-product="${safeDataAttr}" style="position: relative; cursor: pointer;">
+        ? `<div onclick="openProductDetailsById(${p.id})" style="position: relative; cursor: pointer;">
             <img id="img-${p.id}" data-fullsrc="${escapeHtml(mainImage)}" src="${escapeHtml(mainImage)}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
-            <button type="button" data-imgid="img-${p.id}" onclick="event.stopPropagation(); zoomCardImage('img-${p.id}')" class="lbl-zoom" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.65); color: white; border:none; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🔍 Kuza</button>
-            <span class="lbl-details-badge" style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;">👁️ Maelezo & Maoni</span>
+            <button type="button" onclick="event.stopPropagation(); zoomCardImage('img-${p.id}')" class="lbl-zoom" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.65); color: white; border:none; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🔍 Kuza</button>
+            <span class="lbl-details-badge" style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.72); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">👁️ Maelezo & Maoni</span>
            </div>${galleryThumbnailsHtml}`
-        : `<div class="prod-img-wrap" data-product="${safeDataAttr}" style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd; cursor: pointer;">📦</div>`;
+        : `<div onclick="openProductDetailsById(${p.id})" style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd; cursor: pointer;">📦</div>`;
 
       const ratingBadge = avgRating
-        ? `<span style="background:#fff3cd; color:#856404; font-size:11px; padding:2px 6px; border-radius:8px; font-weight:bold;">⭐ ${avgRating} (${activeReviews.length})</span>`
-        : `<span style="background:#f1f3f5; color:#666; font-size:10px; padding:2px 6px; border-radius:8px;">Mpya</span>`;
+        ? `<span style="background:#fff3cd; color:#856404; font-size:11px; padding:2px 6px; border-radius:8px; font-weight:bold;">⭐ ${avgRating} (${activeReviews.length} maoni)</span>`
+        : `<span style="background:#e8f5e9; color:#2e7d32; font-size:10px; padding:2px 6px; border-radius:8px; font-weight:bold;">✓ Duka Lililosajiliwa</span>`;
 
       return `
-      <div class="product-card" data-name="${escapeHtml(p.name.toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
+      <div class="product-card" data-name="${escapeHtml((p.name || '').toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
         <div>
           ${imageHtml}
           <div style="margin-bottom: 5px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
             <span style="background: #e3f2fd; color: #0d47a1; font-size: 10px; padding: 3px 7px; border-radius: 12px; font-weight: bold;">${escapeHtml(categoryStr)}</span>
             ${ratingBadge}
           </div>
-          <h3 class="prod-title-link" data-product="${safeDataAttr}" style="margin: 5px 0; color: #222; font-size: 15px; word-break: break-word; cursor:pointer; text-decoration:underline;">${escapeHtml(p.name)}</h3>
+          <h3 onclick="openProductDetailsById(${p.id})" style="margin: 5px 0; color: #222; font-size: 15px; word-break: break-word; cursor:pointer; text-decoration:underline;">${escapeHtml(p.name)}</h3>
           <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 15px; font-weight: bold; margin: 5px 0 8px 0;">${priceDisplay}</p>
         </div>
         <div style="font-size: 12px; color: #555; margin-bottom: 8px;">
-          <span>🏪 <strong>${escapeHtml(sellerName)}</strong> (${completedShopSales} mauzo)</span><br>
+          <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
           <span>📍 <em>${escapeHtml(sellerLocation)}</em></span><br>
           <span>🎨 <em>${escapeHtml(availableColors)}</em></span>
         </div>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="details-btn-text" data-product="${safeDataAttr}" style="background:#007bff; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">ℹ️ Maelezo</button>
-          <button type="button" class="order-btn-text" data-product="${safeDataAttr}" style="background:#25D366; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">🛒 Agiza</button>
+          <button type="button" class="details-btn-text" onclick="openProductDetailsById(${p.id})" style="background:#007bff; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">ℹ️ Maelezo</button>
+          <button type="button" class="order-btn-text" onclick="openOrderModalById(${p.id})" style="background:#25D366; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">🛒 Agiza</button>
         </div>
       </div>`;
     }).join('');
@@ -613,6 +898,8 @@ app.get('/catalog', async (req, res) => {
     if (products.length === 0) {
       productCards = '<p class="no-prod-text" style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
     }
+
+    const safeCatalogJson = JSON.stringify(catalogProductsMap).replace(/</g, '\\u003c');
 
     res.send(`
     <!DOCTYPE html>
@@ -633,7 +920,7 @@ app.get('/catalog', async (req, res) => {
         .extra-btn { background: #6c757d; color: white; padding: 9px 12px; border-radius: 6px; font-weight: bold; font-size: 13px; border: none; cursor: pointer; }
         .filter-bar { display: flex; gap: 8px; margin-bottom: 15px; flex-direction: column; }
         @media(min-width: 600px) { .filter-bar { flex-direction: row; } }
-        .filter-bar input, .filter-bar select { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; width: 100%; }
+        .filter-bar input, .filter-bar select { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; width: 100%; background: white; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 12px; }
         @media(min-width: 500px) { .grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; } }
         h1 { color: #111; font-size: 20px; margin: 0; }
@@ -642,7 +929,7 @@ app.get('/catalog', async (req, res) => {
         .close-btn { position: absolute; top: 10px; right: 14px; font-size: 26px; cursor: pointer; color: #888; border: none; background: none; }
         .form-group { margin-bottom: 10px; text-align: left; }
         .form-group label { display: block; font-weight: bold; margin-bottom: 4px; color: #333; font-size: 12px; }
-        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; background: white; }
         .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .submit-btn { background: #25D366; color: white; border: none; padding: 12px; width: 100%; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 8px; }
         .cart-float { position: fixed; bottom: 16px; right: 16px; background: #111; color: white; padding: 13px 18px; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer; z-index: 900; border: 2px solid #25D366; font-size: 14px; }
@@ -662,7 +949,7 @@ app.get('/catalog', async (req, res) => {
           </div>
         </div>
         <div class="filter-bar">
-          <input type="text" id="searchInput" onkeyup="filterCatalog()" placeholder="🔍 Tafuta bidhaa au duka...">
+          <input type="text" id="searchInput" oninput="filterCatalog()" onkeyup="filterCatalog()" placeholder="🔍 Tafuta bidhaa au duka...">
           <select id="shopSelect" onchange="filterCatalog()">
             <option value="all" id="optAllShops">🏪 Maduka Yote (All Shops)</option>
             ${shopOptions}
@@ -673,26 +960,26 @@ app.get('/catalog', async (req, res) => {
           </select>
         </div>
         <div class="grid" id="productGrid">
-          ${productCards}
+          ${products.length > 0 ? productCards : emptyCardsHtml}
         </div>
       </div>
 
       <button type="button" class="cart-float" onclick="openCartModal()">🛒 <span id="floatCartLabel">Kikapu Chako</span> (<span id="cartCountFloat">0</span>)</button>
 
-      <!-- Help / FAQ Modal -->
+      <!-- Help Modal -->
       <div id="helpModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeHelpModal()">&times;</button>
           <h3 style="margin-top:0; color:#111; font-size:18px;" id="helpModalTitle">❓ Msaada & Maswali (FAQs)</h3>
           <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
-            <p><strong>1. Jinsi ya kuagiza bidhaa?</strong><br>Bonyeza kitufe cha "Agiza" kwenye bidhaa unayotaka, jaza taarifa zako (namba ya simu na eneo), kisha tuma oda moja kwa moja kupitia WhatsApp (au ongeza kwenye kikapu kuagiza bidhaa nyingi kwa pamoja).</p>
-            <p><strong>2. Jinsi ya kufuatilia oda yako?</strong><br>Bofya "Fuatilia Oda", weka namba yako ya oda na namba ya simu uliyotumia kuagiza ili kuona kama imeshafika au ipo njiani.</p>
+            <p><strong>1. Jinsi ya kuagiza bidhaa?</strong><br>Bonyeza "Maelezo" kuona ubora na maoni ya wateja, au bonyeza "Agiza" kuchagua saizi, idadi, rangi ya kila bidhaa, kisha tuma oda moja kwa moja WhatsApp au weka kwenye Kikapu kwa oda nyingi.</p>
+            <p><strong>2. Jinsi ya kufuatilia oda yako?</strong><br>Bofya "Fuatilia Oda", weka namba yako ya oda na namba ya simu uliyotumia kuagiza ili kuona hatua ya oda na kutoa maoni/nyota.</p>
             <p><strong>3. Jinsi ya kuwa muuzaji (Winga)?</strong><br>Unaweza kujisajili kupitia ukurasa wa Login/Register au kuwasiliana na Admin wa mfumo.</p>
           </div>
         </div>
       </div>
 
-      <!-- About / Contact Modal -->
+      <!-- About Modal -->
       <div id="aboutModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeAboutModal()">&times;</button>
@@ -704,24 +991,24 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Fullscreen Lightbox Image Modal -->
+      <!-- Fullscreen Lightbox Modal -->
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 15px;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
-      <!-- Product Details & Customer Feedback Modal -->
+      <!-- Details Modal -->
       <div id="detailsModal" class="modal-overlay">
         <div class="modal-content">
-          <button type="button" class="close-btn" onclick="document.getElementById('detailsModal').style.display='none'">&times;</button>
+          <button type="button" class="close-btn" onclick="closeModalById('detailsModal')">&times;</button>
           <div id="detailsBody"></div>
         </div>
       </div>
 
-      <!-- Order / Add-to-Cart Modal -->
+      <!-- Order Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
-          <button type="button" class="close-btn" onclick="document.getElementById('orderModal').style.display='none'">&times;</button>
+          <button type="button" class="close-btn" onclick="closeModalById('orderModal')">&times;</button>
           <h3 style="margin-top:0; color:#111; font-size:17px;" id="modalProductName">Agiza Bidhaa</h3>
           <p style="color:#28a745; font-weight:bold; margin-top:-5px; margin-bottom: 10px; font-size:14px;" id="modalProductPrice"></p>
 
@@ -732,7 +1019,7 @@ app.get('/catalog', async (req, res) => {
             </div>
             <div class="form-group">
               <label id="lblQty">Idadi (Quantity):</label>
-              <input type="number" id="orderQty" value="1" min="1" onchange="renderColorPickers()" onkeyup="renderColorPickers()">
+              <input type="number" id="orderQty" value="1" min="1" max="20" oninput="renderColorPickers()" onchange="renderColorPickers()">
             </div>
           </div>
 
@@ -772,7 +1059,7 @@ app.get('/catalog', async (req, res) => {
             </div>
           </div>
           <div class="form-group">
-            <input type="text" id="custCustomStreet" placeholder="Andika jina la mtaa wako..." style="display:none;">
+            <input type="text" id="custCustomStreet" placeholder="Andika jina la mtaa / kijiji..." style="display:none;">
           </div>
 
           <div class="form-group">
@@ -784,10 +1071,10 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Multiple Orders Cart Modal -->
+      <!-- Cart Modal -->
       <div id="cartModal" class="modal-overlay">
         <div class="modal-content">
-          <button type="button" class="close-btn" onclick="document.getElementById('cartModal').style.display='none'">&times;</button>
+          <button type="button" class="close-btn" onclick="closeModalById('cartModal')">&times;</button>
           <h3 style="margin-top:0;">🛒 Kikapu Chako (Multiple Orders)</h3>
           <div id="cartItemsList" style="margin-bottom:12px; font-size:13px;"></div>
           <div id="cartCheckoutSection">
@@ -803,7 +1090,7 @@ app.get('/catalog', async (req, res) => {
               <div class="form-group"><label>Kata:</label><select id="cartWard"></select></div>
               <div class="form-group"><label>Mtaa / Kijiji:</label><select id="cartStreet"></select></div>
             </div>
-            <div class="form-group"><input type="text" id="cartCustomStreet" placeholder="Andika jina la mtaa wako..." style="display:none;"></div>
+            <div class="form-group"><input type="text" id="cartCustomStreet" placeholder="Andika jina la mtaa / kijiji..." style="display:none;"></div>
             <div class="form-group"><label>Maelezo ya Ziada:</label><textarea id="cartNotes" rows="2" placeholder="Maelekezo ya ziada..."></textarea></div>
             <button type="button" class="submit-btn" onclick="checkoutCartWhatsApp()">📲 Tuma Oda Zote WhatsApp</button>
           </div>
@@ -812,6 +1099,7 @@ app.get('/catalog', async (req, res) => {
 
       <script>
         var BOT_PHONE = "${botPhone}";
+        var CATALOG_PRODUCTS = ${safeCatalogJson};
         var activeProduct = null;
         var cart = [];
         try {
@@ -822,95 +1110,10 @@ app.get('/catalog', async (req, res) => {
         }
         var currentLang = localStorage.getItem('winga_lang') || 'sw';
 
-        const translations = {
-          sw: {
-            contactUs: "💬 Contact Us",
-            trackOrder: "🔍 Fuatilia Oda",
-            searchPlaceholder: "🔍 Tafuta bidhaa au duka...",
-            allShops: "🏪 Maduka Yote (All Shops)",
-            allCats: "📁 Vipengele Vyote (Categories)",
-            detailsBtn: "ℹ️ Maelezo",
-            orderBtn: "🛒 Agiza",
-            helpTitle: "❓ Msaada & Maswali (FAQs)",
-            aboutTitle: "ℹ️ Kuhusu Sisi & Mawasiliano",
-            zoomText: "🔍 Kuza",
-            noProd: "Hakuna bidhaa kwenye duka hili kwa sasa.",
-            phoneLbl: "Namba ya Simu (Tarakimu 10):",
-            regionLbl: "Mkoa:",
-            districtLbl: "Wilaya:",
-            wardLbl: "Kata:",
-            streetLbl: "Mtaa / Kijiji:",
-            sizeLbl: "Size:",
-            qtyLbl: "Idadi (Quantity):",
-            notesLbl: "Maelezo ya Ziada (Si lazima):",
-            submitBtn: "📲 Tuma Oda Hii Moja WhatsApp",
-            addToCart: "➕ Ongeza Kwenye Kikapu (Multiple Orders)",
-            floatCart: "Kikapu Chako"
-          },
-          en: {
-            contactUs: "💬 Contact Us",
-            trackOrder: "🔍 Track Order",
-            searchPlaceholder: "🔍 Search products or shops...",
-            allShops: "🏪 All Shops",
-            allCats: "📁 All Categories",
-            detailsBtn: "ℹ️ Details",
-            orderBtn: "🛒 Order",
-            helpTitle: "❓ Help & FAQs",
-            aboutTitle: "ℹ️ About Us & Contact",
-            zoomText: "🔍 Zoom",
-            noProd: "No products available in this shop.",
-            phoneLbl: "Phone Number (10 digits):",
-            regionLbl: "Region:",
-            districtLbl: "District:",
-            wardLbl: "Ward:",
-            streetLbl: "Street / Village:",
-            sizeLbl: "Size:",
-            qtyLbl: "Quantity:",
-            notesLbl: "Additional Notes (Optional):",
-            submitBtn: "📲 Send Single Order via WhatsApp",
-            addToCart: "➕ Add to Cart (Multiple Orders)",
-            floatCart: "Your Cart"
-          }
-        };
-
-        function applyLanguage() {
-          const t = translations[currentLang] || translations.sw;
-          document.getElementById('contactUsBtn').textContent = t.contactUs;
-          document.getElementById('trackOrderBtn').textContent = t.trackOrder;
-          document.getElementById('searchInput').placeholder = t.searchPlaceholder;
-          document.getElementById('optAllShops').textContent = t.allShops;
-          document.getElementById('optAllCats').textContent = t.allCats;
-          document.getElementById('helpBtn').textContent = currentLang === 'en' ? '❓ Help / FAQs' : '❓ Msaada / FAQs';
-          document.getElementById('aboutBtn').textContent = currentLang === 'en' ? 'ℹ️ About / Contact' : 'ℹ️ About / Contact';
-          document.getElementById('floatCartLabel').textContent = t.floatCart;
-
-          document.querySelectorAll('.details-btn-text').forEach(el => el.textContent = t.detailsBtn);
-          document.querySelectorAll('.order-btn-text').forEach(el => el.textContent = t.orderBtn);
-          document.querySelectorAll('.lbl-zoom').forEach(el => el.textContent = t.zoomText);
-          const noProdEl = document.querySelector('.no-prod-text');
-          if (noProdEl) noProdEl.textContent = t.noProd;
-
-          document.getElementById('helpModalTitle').textContent = t.helpTitle;
-          document.getElementById('aboutModalTitle').textContent = t.aboutTitle;
-          document.getElementById('lblPhone').textContent = t.phoneLbl;
-          document.getElementById('lblRegion').textContent = t.regionLbl;
-          document.getElementById('lblDistrict').textContent = t.districtLbl;
-          document.getElementById('lblWard').textContent = t.wardLbl;
-          document.getElementById('lblStreet').textContent = t.streetLbl;
-          document.getElementById('lblSize').textContent = t.sizeLbl;
-          document.getElementById('lblQty').textContent = t.qtyLbl;
-          document.getElementById('lblNotes').textContent = t.notesLbl;
-          document.getElementById('submitOrderBtn').textContent = t.submitBtn;
-          document.getElementById('addToCartBtn').textContent = t.addToCart;
-          document.getElementById('langBtn').textContent = currentLang === 'sw' ? '🌐 SW / EN' : '🌐 EN / SW';
+        function closeModalById(id) {
+          var el = document.getElementById(id);
+          if (el) el.style.display = 'none';
         }
-
-        function toggleLanguage() {
-          currentLang = currentLang === 'sw' ? 'en' : 'sw';
-          localStorage.setItem('winga_lang', currentLang);
-          applyLanguage();
-        }
-
         function openHelpModal() { document.getElementById('helpModal').style.display = 'flex'; }
         function closeHelpModal() { document.getElementById('helpModal').style.display = 'none'; }
         function openAboutModal() { document.getElementById('aboutModal').style.display = 'flex'; }
@@ -925,8 +1128,7 @@ app.get('/catalog', async (req, res) => {
         function zoomCardImage(imgId) {
           var imgEl = document.getElementById(imgId);
           if (!imgEl) return;
-          var src = imgEl.getAttribute('data-fullsrc') || imgEl.getAttribute('src') || '';
-          openImgModal(src);
+          openImgModal(imgEl.getAttribute('data-fullsrc') || imgEl.getAttribute('src') || '');
         }
 
         function selectThumb(thumbEl) {
@@ -939,75 +1141,53 @@ app.get('/catalog', async (req, res) => {
           }
         }
 
-        function parseProductFromEl(el) {
-          try {
-            var raw = el.getAttribute('data-product');
-            return raw ? JSON.parse(raw) : null;
-          } catch (err) {
-            console.error('Failed to parse product data:', err);
-            return null;
-          }
+        function openProductDetailsById(id) {
+          var p = CATALOG_PRODUCTS[id] || CATALOG_PRODUCTS[String(id)];
+          if (p) openProductDetails(p);
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
-          try {
-            if (typeof window.initTzLocation === 'function') {
-              window.initTzLocation('custRegion', 'custDistrict', 'custWard', 'custStreet', 'custCustomStreet');
-              window.initTzLocation('cartRegion', 'cartDistrict', 'cartWard', 'cartStreet', 'cartCustomStreet');
-            }
-          } catch (e) {
-            console.warn('Location helper init warning:', e);
-          }
-
-          document.querySelectorAll('.details-btn-text, .prod-title-link, .prod-img-wrap').forEach(el => {
-            el.addEventListener('click', function() {
-              const p = parseProductFromEl(this);
-              if (p) openProductDetails(p);
-            });
-          });
-
-          document.querySelectorAll('.order-btn-text').forEach(el => {
-            el.addEventListener('click', function() {
-              const p = parseProductFromEl(this);
-              if (p) openOrderModal(p);
-            });
-          });
-
-          updateCartBadges();
-          applyLanguage();
-        });
+        function openOrderModalById(id) {
+          var p = CATALOG_PRODUCTS[id] || CATALOG_PRODUCTS[String(id)];
+          if (p) openOrderModal(p);
+        }
 
         function updateCartBadges() {
-          document.getElementById('cartCountTop').textContent = cart.length;
-          document.getElementById('cartCountFloat').textContent = cart.length;
+          var topEl = document.getElementById('cartCountTop');
+          var floatEl = document.getElementById('cartCountFloat');
+          if (topEl) topEl.textContent = cart.length;
+          if (floatEl) floatEl.textContent = cart.length;
         }
 
         function filterCatalog() {
-          var searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
-          var catVal = document.getElementById('categorySelect').value.toLowerCase();
-          var shopVal = document.getElementById('shopSelect').value;
-          var cards = document.getElementsByClassName('product-card');
-          for (var i = 0; i < cards.length; i++) {
-            var cardName = (cards[i].getAttribute('data-name') || '').toLowerCase();
-            var cardCat = (cards[i].getAttribute('data-category') || '').toLowerCase();
-            var cardShop = String(cards[i].getAttribute('data-shop') || '');
-            var cardShopName = (cards[i].getAttribute('data-shopname') || '').toLowerCase();
-            var matchesSearch = cardName.indexOf(searchVal) !== -1 || cardShopName.indexOf(searchVal) !== -1;
-            var matchesCat = (catVal === 'all' || cardCat === catVal);
-            var matchesShop = (shopVal === 'all' || cardShop === String(shopVal));
-            cards[i].style.display = (matchesSearch && matchesCat && matchesShop) ? 'flex' : 'none';
+          try {
+            var searchVal = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+            var catVal = (document.getElementById('categorySelect').value || 'all').toLowerCase();
+            var shopVal = document.getElementById('shopSelect').value || 'all';
+            var cards = document.getElementsByClassName('product-card');
+            for (var i = 0; i < cards.length; i++) {
+              var cardName = (cards[i].getAttribute('data-name') || '').toLowerCase();
+              var cardCat = (cards[i].getAttribute('data-category') || '').toLowerCase();
+              var cardShop = String(cards[i].getAttribute('data-shop') || '');
+              var cardShopName = (cards[i].getAttribute('data-shopname') || '').toLowerCase();
+              var matchesSearch = !searchVal || cardName.indexOf(searchVal) !== -1 || cardShopName.indexOf(searchVal) !== -1;
+              var matchesCat = (catVal === 'all' || cardCat === catVal);
+              var matchesShop = (shopVal === 'all' || cardShop === String(shopVal));
+              cards[i].style.display = (matchesSearch && matchesCat && matchesShop) ? 'flex' : 'none';
+            }
+          } catch (e) {
+            console.error('filterCatalog error:', e);
           }
         }
 
         function openProductDetails(p) {
           if (!p) return;
           const imgsHtml = (p.images && p.images.length > 0)
-            ? p.images.map(u => '<img src="' + u + '" data-zoomurl="' + u + '" onclick="openImgModal(this.getAttribute(\'data-zoomurl\'))" style="width:100%; max-height:240px; object-fit:contain; background:#f8f9fa; border-radius:8px; margin-bottom:8px; cursor:pointer;">').join('')
+            ? p.images.map(u => '<img src="' + u + '" onclick="openImgModal(\'' + u.replace(/'/g, "\\'") + '\')" style="width:100%; max-height:240px; object-fit:contain; background:#f8f9fa; border-radius:8px; margin-bottom:8px; cursor:pointer;">').join('')
             : '<div style="height:120px; background:#eee; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:40px;">📦</div>';
 
-          const trustBadge = p.completedSales > 0
-            ? '<span style="background:#d4edda; color:#155724; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">✅ Duka Limethibitishwa (' + p.completedSales + ' Oda Zilizokamilika)</span>'
-            : '<span style="background:#fff3cd; color:#856404; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">🆕 Duka Jipya Sokoni</span>';
+          const trustBadge = p.avgRating
+            ? '<span style="background:#fff3cd; color:#856404; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">⭐ Wastani wa Nyota: ' + p.avgRating + ' / 5 (' + p.reviews.length + ' maoni)</span>'
+            : '<span style="background:#e8f5e9; color:#2e7d32; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">✓ Muuzaji Amesajiliwa Kwenye Mfumo</span>';
 
           let reviewsHtml = '<p style="color:#777; font-size:13px;">Bado hakuna maoni ya wateja kwa bidhaa/duka hili.</p>';
           if (p.reviews && p.reviews.length > 0) {
@@ -1035,7 +1215,7 @@ app.get('/catalog', async (req, res) => {
             '<button type="button" id="detailsOrderNowBtn" class="submit-btn">🛒 Endelea Kuagiza Bidhaa Hii</button>';
 
           document.getElementById('detailsOrderNowBtn').onclick = function() {
-            document.getElementById('detailsModal').style.display = 'none';
+            closeModalById('detailsModal');
             openOrderModal(p);
           };
 
@@ -1108,8 +1288,8 @@ app.get('/catalog', async (req, res) => {
           });
           localStorage.setItem('winga_cart', JSON.stringify(cart));
           updateCartBadges();
-          document.getElementById('orderModal').style.display = 'none';
-          alert('✅ "' + activeProduct.name + '" imeongezwa kwenye kikapu! Unaweza kuongeza bidhaa nyingine au kufungua Kikapu kutuma oda zote.');
+          closeModalById('orderModal');
+          alert('✅ "' + activeProduct.name + '" imeongezwa kwenye kikapu!');
         }
 
         function openCartModal() {
@@ -1150,70 +1330,103 @@ app.get('/catalog', async (req, res) => {
           const w = wEl ? wEl.value : '';
           const s = sEl ? sEl.value : '';
           const c = cEl ? cEl.value.trim() : '';
-          const finalS = s === '__OTHER__' ? c : s;
-          if (!r || !d || !w || !finalS) return null;
-          return finalS + ', ' + w + ', ' + d + ', ' + r;
+          const cleanWard = (w === '__OTHER_WARD__') ? '' : w;
+          const finalS = (s === '__OTHER__' || w === '__OTHER_WARD__') ? c : s;
+          if (!r || !d || !finalS) return null;
+          return [finalS, cleanWard, d, r].filter(Boolean).join(', ');
         }
 
         function sendSingleOrderWhatsApp() {
           if (!activeProduct) return;
-          const phone = document.getElementById('orderPhone').value.trim();
+          const phone = (document.getElementById('orderPhone').value || '').trim();
           const fullLoc = getLocationText('cust');
           if (!/^[0-9]{10}$/.test(phone)) return alert('❌ Weka namba ya simu yenye tarakimu 10 (mfano: 0712345678).');
-          if (!fullLoc) return alert('❌ Tafadhali chagua Mkoa, Wilaya, Kata na Mtaa wako.');
+          if (!fullLoc) return alert('❌ Tafadhali chagua Mkoa, Wilaya, Kata na Mtaa/Kijiji chako.');
 
           const size = document.getElementById('orderSize').value || 'Standard';
           const colorSummary = getSelectedColorsSummary();
           const qty = document.getElementById('orderQty').value || 1;
-          const notes = document.getElementById('orderNotes').value.trim() || 'Hakuna';
+          const notes = (document.getElementById('orderNotes').value || '').trim() || 'Hakuna';
 
           const message = '!agiza ' + activeProduct.id +
-            '\n\n*TAARIFA ZA ODA:*' +
-            '\n📦 Bidhaa: ' + activeProduct.name +
-            '\n💰 Bei: TSh ' + activeProduct.priceFormatted +
-            '\n📞 Simu: ' + phone +
-            '\n📍 Eneo: ' + fullLoc +
-            '\n📏 Saizi: ' + size +
-            '\n🎨 Rangi: ' + colorSummary +
-            '\n🔢 Idadi: ' + qty +
-            '\n📝 Maelezo: ' + notes;
+            '\\n\\n*TAARIFA ZA ODA:*' +
+            '\\n📦 Bidhaa: ' + activeProduct.name +
+            '\\n💰 Bei: TSh ' + activeProduct.priceFormatted +
+            '\\n📞 Simu: ' + phone +
+            '\\n📍 Eneo: ' + fullLoc +
+            '\\n📏 Saizi: ' + size +
+            '\\n🎨 Rangi: ' + colorSummary +
+            '\\n🔢 Idadi: ' + qty +
+            '\\n📝 Maelezo: ' + notes;
 
           window.open('https://wa.me/' + BOT_PHONE + '?text=' + encodeURIComponent(message), '_blank');
-          document.getElementById('orderModal').style.display = 'none';
+          closeModalById('orderModal');
         }
 
         function checkoutCartWhatsApp() {
-          if (cart.length === 0) return;
-          const phone = document.getElementById('cartPhone').value.trim();
+          if (!cart || cart.length === 0) return;
+          const phone = (document.getElementById('cartPhone').value || '').trim();
           const fullLoc = getLocationText('cart');
           if (!/^[0-9]{10}$/.test(phone)) return alert('❌ Weka namba ya simu yenye tarakimu 10.');
-          if (!fullLoc) return alert('❌ Tafadhali chagua Mkoa, Wilaya, Kata na Mtaa wako.');
-          const notes = document.getElementById('cartNotes').value.trim() || 'Hakuna';
+          if (!fullLoc) return alert('❌ Tafadhali chagua Mkoa, Wilaya, Kata na Mtaa/Kijiji chako.');
+          const notes = (document.getElementById('cartNotes').value || '').trim() || 'Hakuna';
 
           const itemLines = cart.map((it, idx) =>
             'ITEM ' + (idx + 1) + ': #' + it.id + ' | Size: ' + it.size + ' | Rangi: ' + it.color + ' | Idadi: ' + it.qty
-          ).join('\n');
+          ).join('\\n');
 
           const message = '!agiza' +
-            '\n' + itemLines +
-            '\n📞 Simu: ' + phone +
-            '\n📍 Eneo: ' + fullLoc +
-            '\n📝 Maelezo: ' + notes;
+            '\\n' + itemLines +
+            '\\n📞 Simu: ' + phone +
+            '\\n📍 Eneo: ' + fullLoc +
+            '\\n📝 Maelezo: ' + notes;
 
           cart = [];
           localStorage.setItem('winga_cart', '[]');
           updateCartBadges();
-          document.getElementById('cartModal').style.display = 'none';
+          closeModalById('cartModal');
           window.open('https://wa.me/' + BOT_PHONE + '?text=' + encodeURIComponent(message), '_blank');
         }
 
-        window.onclick = function(e) {
-          if (e.target === document.getElementById('orderModal')) document.getElementById('orderModal').style.display = 'none';
-          if (e.target === document.getElementById('detailsModal')) document.getElementById('detailsModal').style.display = 'none';
-          if (e.target === document.getElementById('cartModal')) document.getElementById('cartModal').style.display = 'none';
-          if (e.target === document.getElementById('helpModal')) closeHelpModal();
-          if (e.target === document.getElementById('aboutModal')) closeAboutModal();
-        };
+        function toggleLanguage() {
+          currentLang = currentLang === 'sw' ? 'en' : 'sw';
+          localStorage.setItem('winga_lang', currentLang);
+          var isEn = currentLang === 'en';
+          document.getElementById('contactUsBtn').textContent = '💬 Contact Us';
+          document.getElementById('trackOrderBtn').textContent = isEn ? '🔍 Track Order' : '🔍 Fuatilia Oda';
+          document.getElementById('searchInput').placeholder = isEn ? '🔍 Search products or shops...' : '🔍 Tafuta bidhaa au duka...';
+          document.getElementById('optAllShops').textContent = isEn ? '🏪 All Shops' : '🏪 Maduka Yote (All Shops)';
+          document.getElementById('optAllCats').textContent = isEn ? '📁 All Categories' : '📁 Vipengele Vyote (Categories)';
+          document.getElementById('helpBtn').textContent = isEn ? '❓ Help / FAQs' : '❓ Msaada / FAQs';
+          document.getElementById('aboutBtn').textContent = isEn ? 'ℹ️ About / Contact' : 'ℹ️ About / Contact';
+          document.getElementById('floatCartLabel').textContent = isEn ? 'Your Cart' : 'Kikapu Chako';
+          document.getElementById('langBtn').textContent = isEn ? '🌐 SW / EN' : '🌐 EN / SW';
+          document.querySelectorAll('.details-btn-text').forEach(el => el.textContent = isEn ? 'ℹ️ Details' : 'ℹ️ Maelezo');
+          document.querySelectorAll('.order-btn-text').forEach(el => el.textContent = isEn ? '🛒 Order' : '🛒 Agiza');
+        }
+
+        window.addEventListener('DOMContentLoaded', function() {
+          try {
+            if (typeof window.initTzLocation === 'function') {
+              window.initTzLocation('custRegion', 'custDistrict', 'custWard', 'custStreet', 'custCustomStreet');
+              window.initTzLocation('cartRegion', 'cartDistrict', 'cartWard', 'cartStreet', 'cartCustomStreet');
+            }
+          } catch (locErr) {
+            console.warn('Location init error:', locErr);
+          }
+          updateCartBadges();
+          if (currentLang === 'en') {
+            currentLang = 'sw';
+            toggleLanguage();
+          }
+        });
+
+        window.addEventListener('click', function(e) {
+          ['orderModal', 'detailsModal', 'cartModal', 'helpModal', 'aboutModal'].forEach(function(id) {
+            var m = document.getElementById(id);
+            if (m && e.target === m) m.style.display = 'none';
+          });
+        });
       </script>
     </body>
     </html>
@@ -1539,7 +1752,7 @@ app.get('/register', (req, res) => {
 
         <label>Chagua Mtaa / Kijiji:</label>
         <select name="street" id="regStreet" required></select>
-        <input type="text" name="customStreet" id="regCustomStreet" placeholder="Andika jina la mtaa wako..." style="display:none;">
+        <input type="text" name="customStreet" id="regCustomStreet" placeholder="Andika jina la mtaa / kijiji..." style="display:none;">
 
         <label>Weka Nenosiri (Password):</label>
         <div class="password-container">
@@ -1622,7 +1835,7 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Seller Dashboard (/admin) - #2 Fix: Image Preview on Upload + Edit Product Modal & Route
+// Seller Dashboard (/admin)
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
@@ -1709,7 +1922,7 @@ app.get('/admin', requireWinga, async (req, res) => {
 
     let orderRows = orders.map(o => {
       const currentStatus = o.status || 'Pending';
-      const rev = reviews.find(r => r.orderId === o.orderId);
+      const rev = reviews.find(r => Number(r.orderId) === Number(o.orderId));
       let badgeStyle = 'background:#ffc107; color:#000;';
       if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
       if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
@@ -2332,6 +2545,9 @@ app.post('/admin/add', requireWinga, (req, res) => {
     }
     try {
       const { name, category, buyingPrice, sellingPrice, size, colors, customColors } = req.body;
+      if (!name || !name.trim()) {
+        return res.redirect('/admin?error=upload&reason=' + encodeURIComponent('Jina la bidhaa linahitajika'));
+      }
       const imageUrls = await uploadBuffersToCloudinary(req.files || []);
 
       const selectedList = Array.isArray(colors) ? colors : (colors ? [colors] : []);
@@ -2366,7 +2582,7 @@ app.post('/admin/add', requireWinga, (req, res) => {
   });
 });
 
-// #2 Fix: Edit Product Route
+// Edit Product Route
 app.post('/admin/product/edit', requireWinga, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -2476,7 +2692,7 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password (#4 Fix: Clearer connection check & error handling)
+// Forgot & Reset Password
 app.get('/forgot-password', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:320px;"><h2>🔑 Umesahau Nenosiri?</h2><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;">← Rudi Login</a></div></body></html>`);
 });
@@ -2575,7 +2791,7 @@ app.post('/reset-password', async (req, res) => {
   }
 });
 
-// Super Admin Dashboard (#3 Fix: Orders Table Showing Ordered Product Photos)
+// Super Admin Dashboard
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -2586,8 +2802,8 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     let platformTotalRevenue = 0;
 
     let wingaRows = wingas.map(w => {
-      const wProducts = products.filter(p => p.wingaId === w.id);
-      const wOrders = orders.filter(o => o.wingaId === w.id);
+      const wProducts = products.filter(p => Number(p.wingaId) === Number(w.id));
+      const wOrders = orders.filter(o => Number(o.wingaId) === Number(w.id));
       let wingaRevenue = 0, wingaCost = 0, completedOrders = 0;
       wOrders.forEach(o => {
         if (o.status === 'Completed') {
@@ -2640,7 +2856,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     }).join('');
 
     let superadminOrderRows = orders.map(o => {
-      const matchedWinga = wingas.find(w => w.id === o.wingaId);
+      const matchedWinga = wingas.find(w => Number(w.id) === Number(o.wingaId));
       const matchedProduct = findMatchedProductForOrder(o, products);
       const images = getProductImages(matchedProduct);
 
@@ -2670,7 +2886,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     }).join('');
 
     let superadminProductRows = products.map(p => {
-      const matchedWinga = wingas.find(w => w.id === p.wingaId);
+      const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
       const images = getProductImages(p);
       const mainImg = images[0] ? `<img src="${escapeHtml(images[0])}" data-zoom="${escapeHtml(images[0])}" onclick="openModal(this.getAttribute('data-zoom'))" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; cursor: pointer;" title="Bonyeza kukuza">` : '📦';
       return `
@@ -2690,8 +2906,8 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     }).join('');
 
     let superadminFeedbackRows = reviews.map(rev => {
-      const matchedOrder = orders.find(o => o.orderId === rev.orderId);
-      const matchedWinga = matchedOrder ? wingas.find(w => w.id === matchedOrder.wingaId) : null;
+      const matchedOrder = orders.find(o => Number(o.orderId) === Number(rev.orderId));
+      const matchedWinga = matchedOrder ? wingas.find(w => Number(w.id) === Number(matchedOrder.wingaId)) : null;
       return `<tr><td><strong>#${rev.orderId}</strong></td><td>${escapeHtml(matchedWinga ? matchedWinga.name : 'Unknown')}</td><td>${escapeHtml(matchedOrder ? matchedOrder.productName : 'N/A')}</td><td>${'⭐'.repeat(rev.rating)} (${rev.rating}/5)</td><td>"${escapeHtml(rev.comment)}"</td></tr>`;
     }).join('');
 
@@ -2712,7 +2928,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
         .stat-card p { margin: 0; font-size: 20px; font-weight: bold; color: #4ade80; }
         .card { background: white; padding: 18px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-        input, select { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-size: 14px; }
+        input, select { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-size: 14px; background: white; }
         button.btn-main { background: #007bff; color: white; border: none; padding: 11px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
         .table-responsive { width: 100%; overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 650px; font-size: 13px; }
@@ -2743,7 +2959,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
               <select name="district" id="saDistrict" required></select>
               <select name="ward" id="saWard" required></select>
               <select name="street" id="saStreet" required></select>
-              <input type="text" name="customStreet" id="saCustomStreet" placeholder="Andika jina la mtaa..." style="display:none;">
+              <input type="text" name="customStreet" id="saCustomStreet" placeholder="Andika jina la mtaa / kijiji..." style="display:none;">
             </div>
             <button type="submit" class="btn-main">Sajili Muuzaji Mpya</button>
           </form>
