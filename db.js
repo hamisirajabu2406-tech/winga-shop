@@ -89,6 +89,15 @@ async function initDb() {
       });
     }
 
+if (await knex.schema.hasTable('wingas')) {
+      const hasSmsEnabled = await knex.schema.hasColumn('wingas', 'sms_enabled');
+      if (!hasSmsEnabled) {
+        await knex.schema.alterTable('wingas', (table) => {
+          table.boolean('sms_enabled').notNullable().defaultTo(false);
+        });
+      }
+    }
+
     console.log('✅ Database initialized successfully.');
   } catch (err) {
     console.error('❌ Database init error:', err.message);
