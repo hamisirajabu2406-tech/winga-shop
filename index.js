@@ -4,12 +4,14 @@ const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
+const orderRoutes = require('./routes/orderRoutes');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('cloudinary').v2;
+const { sendSellerOrderSms } = require('./services/smsService');
 const db = require('./db');
 
 const app = express();
@@ -39,6 +41,7 @@ if (process.env.NODE_ENV === 'production') {
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
 
 // Landing Page with Contact Us & About Us
 app.get(['/', '/index.html'], (req, res) => {
@@ -98,6 +101,9 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
+
+app.use('/api', orderRoutes);
+
 
 // Multer Memory Storage Configuration
 const upload = multer({
@@ -329,6 +335,20 @@ async function connectToWhatsApp() {
                 `📍 *Fuatilia Oda Yako Hapa (Weka namba yako ya simu kuhakiki):*\n${trackUrl}`
         });
         await notifyWinga(newOrder, product);
+
+        // Tuma SMS kupitia Beem (Sender ID: MAPINDA) ikiwa winga ameruhusiwa (sms_enabled = true)
+        const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
+        if (orderWinga && Boolean(orderWinga.sms_enabled) && orderWinga.phone) {
+          sendSellerOrderSms({
+            phone: orderWinga.phone,
+            sellerName: orderWinga.name,
+            orderId: newOrder.orderId,
+            totalAmount: newOrder.sellingPrice,
+          }).catch((err) => {
+            console.error('[SMS Hook] Imeshindwa kutuma SMS kwa winga:', err);
+          });
+        }
+
         continue;
       }
 
