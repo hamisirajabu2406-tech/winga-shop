@@ -8,7 +8,7 @@ const knex = require('knex')({
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'defaultdb',
     port: process.env.DB_PORT || 25801,
-    ssl: { rejectUnauthorized: false } // Muhimu kwa ajili ya usalama wa Aiven cloud
+    ssl: { rejectUnauthorized: false }
   },
   pool: { min: 2, max: 10 }
 });
@@ -20,11 +20,24 @@ async function initDb() {
         table.increments('id').primary();
         table.string('name').notNullable();
         table.string('phone', 50).unique().notNullable();
+        table.string('location', 255).defaultTo('Tanzania');
         table.string('password').notNullable();
         table.string('status', 50).defaultTo('active');
+        table.boolean('sms_enabled').notNullable().defaultTo(false);
         table.timestamp('expiryDate').nullable();
         table.timestamp('dateAdded').defaultTo(knex.fn.now());
       });
+    } else {
+      if (!await knex.schema.hasColumn('wingas', 'location')) {
+        await knex.schema.alterTable('wingas', (table) => {
+          table.string('location', 255).defaultTo('Tanzania');
+        });
+      }
+      if (!await knex.schema.hasColumn('wingas', 'sms_enabled')) {
+        await knex.schema.alterTable('wingas', (table) => {
+          table.boolean('sms_enabled').notNullable().defaultTo(false);
+        });
+      }
     }
 
     if (!await knex.schema.hasTable('products')) {
@@ -36,12 +49,19 @@ async function initDb() {
         table.decimal('buyingPrice', 10, 2).defaultTo(0);
         table.decimal('sellingPrice', 10, 2).notNullable();
         table.decimal('price', 10, 2).notNullable();
-        table.string('size', 50).defaultTo('Standard');
+        table.string('size', 100).defaultTo('Standard');
+        table.string('colors', 255).defaultTo('Kama pichani');
         table.text('imageUrl');
         table.text('imageLocalPath');
         table.timestamp('dateAdded').defaultTo(knex.fn.now());
         table.foreign('wingaId').references('wingas.id').onDelete('CASCADE');
       });
+    } else {
+      if (!await knex.schema.hasColumn('products', 'colors')) {
+        await knex.schema.alterTable('products', (table) => {
+          table.string('colors', 255).defaultTo('Kama pichani');
+        });
+      }
     }
 
     if (!await knex.schema.hasTable('orders')) {
@@ -49,6 +69,7 @@ async function initDb() {
         table.increments('id').primary();
         table.integer('orderId').notNullable();
         table.integer('wingaId').unsigned().notNullable();
+        table.integer('productId').unsigned().nullable();
         table.string('productName').notNullable();
         table.decimal('buyingPrice', 10, 2).defaultTo(0);
         table.decimal('sellingPrice', 10, 2).notNullable();
@@ -59,6 +80,12 @@ async function initDb() {
         table.timestamp('date').defaultTo(knex.fn.now());
         table.foreign('wingaId').references('wingas.id').onDelete('CASCADE');
       });
+    } else {
+      if (!await knex.schema.hasColumn('orders', 'productId')) {
+        await knex.schema.alterTable('orders', (table) => {
+          table.integer('productId').unsigned().nullable();
+        });
+      }
     }
 
     if (!await knex.schema.hasTable('reviews')) {
@@ -89,16 +116,7 @@ async function initDb() {
       });
     }
 
-if (await knex.schema.hasTable('wingas')) {
-      const hasSmsEnabled = await knex.schema.hasColumn('wingas', 'sms_enabled');
-      if (!hasSmsEnabled) {
-        await knex.schema.alterTable('wingas', (table) => {
-          table.boolean('sms_enabled').notNullable().defaultTo(false);
-        });
-      }
-    }
-
-    console.log('✅ Database initialized successfully.');
+    console.log('✅ Database initialized & migrated successfully.');
   } catch (err) {
     console.error('❌ Database init error:', err.message);
   }
