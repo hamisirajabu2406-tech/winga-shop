@@ -63,7 +63,7 @@ let reconnectTimer = null;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
-// SuperAdmin credentials (defaults to the two requested admin numbers)
+// SuperAdmin credentials
 const SUPER_ADMINS = [
   {
     phone: (process.env.SUPERADMIN_PHONE_1 || '0678143403').trim(),
@@ -600,7 +600,6 @@ function findMatchedProductForOrder(order, productsList) {
   );
 }
 
-// Strict per-product review matcher so feedback never leaks across different products
 function getReviewsForProduct(product, allOrders, allReviews) {
   if (!product || !Array.isArray(allOrders) || !Array.isArray(allReviews)) return [];
   const prodNameLower = (product.name || '').trim().toLowerCase();
@@ -627,7 +626,7 @@ async function insertOrderSafe(orderObj) {
   } catch (err) {
     if (
       orderObj.productId !== undefined &&
-      /productId|Unknown column/i.test(err.message || '')
+      /productId|Unknown column|no such column/i.test(err.message || '')
     ) {
       const fallbackObj = { ...orderObj };
       delete fallbackObj.productId;
@@ -655,26 +654,16 @@ function extractIncomingText(msg) {
 }
 
 function isBotSocketReady() {
-  return Boolean(sock && isWhatsappReady && sock.user);
+  return Boolean(sock && (isWhatsappReady || sock.user));
 }
 
-async function resolveWhatsAppRecipientJid(phoneOrJid) {
+function buildDirectJid(phoneOrJid) {
   if (!phoneOrJid) return null;
-  if (String(phoneOrJid).includes('@')) return String(phoneOrJid).trim();
-  const intl = normalizePhone(phoneOrJid);
+  const raw = String(phoneOrJid).trim();
+  if (raw.includes('@')) return raw;
+  const intl = normalizePhone(raw);
   if (!intl) return null;
-  const standardJid = `${intl}@s.whatsapp.net`;
-  if (sock && typeof sock.onWhatsApp === 'function') {
-    try {
-      const results = await sock.onWhatsApp(intl);
-      if (Array.isArray(results) && results.length > 0 && results[0].exists && results[0].jid) {
-        return results[0].jid;
-      }
-    } catch (e) {
-      // Fallback to standard JID
-    }
-  }
-  return standardJid;
+  return `${intl}@s.whatsapp.net`;
 }
 
 function scheduleReconnect(delayMs = 4000) {
@@ -692,7 +681,6 @@ async function connectToWhatsApp() {
   try {
     const authDir = process.env.WA_AUTH_DIR || path.join(__dirname, 'auth_info_baileys');
 
-    // Optional base64 session restore for ephemeral hosting if provided
     if (process.env.WA_AUTH_SESSION_B64 && !fs.existsSync(authDir)) {
       try {
         fs.mkdirSync(authDir, { recursive: true });
@@ -851,6 +839,8 @@ async function connectToWhatsApp() {
 
         // 2. Order command via WhatsApp: !agiza / !order
         if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
+          console.log('📩 Incoming order message from:', remoteJid, '\n', text);
+
           const senderDigits = remoteJid
             .replace('@s.whatsapp.net', '')
             .replace('@c.us', '')
@@ -942,21 +932,10 @@ async function connectToWhatsApp() {
             } else {
               const commaParts = afterCommand.split(',');
               for (const part of commaParts) {
-                const m = part.trim().match(/^#?(\d+)$/);
+                const m = part.trim().match(/#?(\d+)/);
                 if (m) {
                   orderItems.push({
                     id: parseInt(m[1], 10),
-                    size: defaultSize,
-                    color: defaultColor,
-                    qty: defaultQty
-                  });
-                }
-              }
-              if (orderItems.length === 0) {
-                const firstNumMatch = afterCommand.match(/#?(\d+)/);
-                if (firstNumMatch) {
-                  orderItems.push({
-                    id: parseInt(firstNumMatch[1], 10),
                     size: defaultSize,
                     color: defaultColor,
                     qty: defaultQty
@@ -987,8 +966,8 @@ async function connectToWhatsApp() {
 
           for (const item of orderItems) {
             let product = null;
-            if (item.id) {
-              product = await db('products').where({ id: item.id }).first();
+            if (item.id && !isNaN(item.id)) {
+              product = await db('products').where({ id: Number(item.id) }).first();
             }
             if (!product && quotedProductName) {
               product = await db('products')
@@ -996,6 +975,7 @@ async function connectToWhatsApp() {
                 .first();
             }
             if (!product) {
+              console.warn('⚠️ Product not found for order item:', item, 'quotedName:', quotedProductName);
               missingIds.push(item.id || quotedProductName);
               continue;
             }
@@ -1035,6 +1015,7 @@ async function connectToWhatsApp() {
             };
 
             await insertOrderSafe(newOrder);
+            console.log('✅ New order saved in DB:', newOrder.orderId, 'Product:', product.name);
             createdReceipts.push({ order: newOrder, product });
 
             await notifyWinga(newOrder, product);
@@ -1088,7 +1069,7 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        // 3. Greeting / Catalog shortcut (only when not sent by bot itself)
+        // 3. Greeting / Catalog shortcut
         const greetingKeywords = [
           'hi',
           'hello',
@@ -1124,7 +1105,7 @@ async function connectToWhatsApp() {
   }
 }
 
-async function notifyShopCustomers(winga) {
+async function notifyShopCustomers(winga, newProduct) {
   try {
     if (!isBotSocketReady() || !winga) return;
 
@@ -1147,13 +1128,21 @@ async function notifyShopCustomers(winga) {
 
     shopBroadcastCooldown.set(winga.id, now);
 
+    const images = getProductImages(newProduct);
     const alertMsg =
-      `📢 Duka la *${winga.name}* limeongeza bidhaa mpya leo.\n` +
-      `Tazama hapa: ${PUBLIC_URL}/catalog?shop=${winga.id}`;
+      `📢 *TAARIFA ZA BIDHAA MPYA!* 🛍️\n` +
+      `-----------------------------------\n` +
+      `Duka la *${winga.name}* limeongeza bidhaa mpya sokoni!\n\n` +
+      (newProduct ? `📦 *Bidhaa:* ${newProduct.name}\n💰 *Bei:* TSh ${Number(newProduct.sellingPrice || 0).toLocaleString()}\n\n` : '') +
+      `🔗 *Tazama na uagize hapa:*\n${PUBLIC_URL}/catalog?shop=${winga.id}`;
 
     for (const jid of customerJids) {
       try {
-        await sock.sendMessage(jid, { text: alertMsg });
+        if (newProduct && images.length > 0 && isHttpUrl(images[0])) {
+          await sock.sendMessage(jid, { image: { url: images[0] }, caption: alertMsg });
+        } else {
+          await sock.sendMessage(jid, { text: alertMsg });
+        }
       } catch (sendErr) {
         console.error(`Failed sending broadcast to ${jid}:`, sendErr.message);
       }
@@ -1168,7 +1157,7 @@ async function notifyWinga(order, product) {
     if (!isBotSocketReady()) return;
     const winga = await db('wingas').where({ id: order.wingaId }).first();
     if (!winga || !winga.phone) return;
-    const wingaChatId = await resolveWhatsAppRecipientJid(winga.phone);
+    const wingaChatId = buildDirectJid(winga.phone);
     if (!wingaChatId) return;
 
     const alertMessage =
@@ -1201,7 +1190,6 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Bot status & manual reconnect helper route
 app.get('/bot-status', (req, res) => {
   if (req.query.reconnect === '1' && !isBotSocketReady()) {
     isReconnecting = false;
@@ -1218,15 +1206,13 @@ app.get('/bot-status', (req, res) => {
 });
 
 // ==========================================
-// PUBLIC CATALOG (Product-Specific Reviews Only)
+// PUBLIC CATALOG
 // ==========================================
 app.get('/catalog', async (req, res) => {
   try {
     try {
       await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
-    } catch (statErr) {
-      // Optional stats table
-    }
+    } catch (statErr) {}
 
     const allProducts = await db('products').select('*');
     const wingas = await db('wingas').select('*');
@@ -1434,7 +1420,6 @@ app.get('/catalog', async (req, res) => {
 
       <button type="button" class="cart-float" onclick="openCartModal()">🛒 <span id="floatCartLabel">Kikapu Chako</span> (<span id="cartCountFloat">0</span>)</button>
 
-      <!-- Help Modal -->
       <div id="helpModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeHelpModal()">&times;</button>
@@ -1447,7 +1432,6 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- About Modal -->
       <div id="aboutModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeAboutModal()">&times;</button>
@@ -1459,13 +1443,11 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Fullscreen Lightbox Modal -->
       <div id="fullImgModal" onclick="closeImgModal()" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; cursor: pointer; padding: 15px;">
         <span style="position: absolute; top: 15px; right: 25px; color: #fff; font-size: 35px; font-weight: bold;">&times;</span>
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
-      <!-- Product Details Modal -->
       <div id="detailsModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeModalById('detailsModal')">&times;</button>
@@ -1473,7 +1455,6 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Order Modal -->
       <div id="orderModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeModalById('orderModal')">&times;</button>
@@ -1539,7 +1520,6 @@ app.get('/catalog', async (req, res) => {
         </div>
       </div>
 
-      <!-- Cart Modal -->
       <div id="cartModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeModalById('cartModal')">&times;</button>
@@ -3109,7 +3089,6 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   }
 });
 
-// Add Product
 app.post('/admin/add', requireWinga, (req, res) => {
   upload(req, res, async err => {
     if (err) {
@@ -3149,11 +3128,12 @@ app.post('/admin/add', requireWinga, (req, res) => {
         dateAdded: new Date()
       };
 
-      await db('products').insert(newProductData);
+      const [insertedId] = await db('products').insert(newProductData);
+      const newProduct = await db('products').where({ id: insertedId }).first();
 
       const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
       if (currentWinga) {
-        notifyShopCustomers(currentWinga).catch(e => console.error('Broadcast err:', e));
+        notifyShopCustomers(currentWinga, newProduct).catch(e => console.error('Broadcast err:', e));
       }
       res.redirect('/admin?added=true');
     } catch (dbErr) {
@@ -3166,7 +3146,6 @@ app.post('/admin/add', requireWinga, (req, res) => {
   });
 });
 
-// Edit Product
 app.post('/admin/product/edit', requireWinga, (req, res) => {
   upload(req, res, async err => {
     if (err) {
@@ -3262,7 +3241,7 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
 
       let customerChatId = order.senderJid;
       if (!customerChatId || !String(customerChatId).includes('@')) {
-        customerChatId = await resolveWhatsAppRecipientJid(order.customerPhone);
+        customerChatId = buildDirectJid(order.customerPhone);
       }
 
       if (customerChatId && isBotSocketReady()) {
@@ -3373,7 +3352,7 @@ app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) 
       expiresAt: new Date(Date.now() + 10 * 60 * 1000)
     });
 
-    const targetJid = await resolveWhatsAppRecipientJid(cleanedPhone);
+    const targetJid = `${cleanedPhone}@s.whatsapp.net`;
     await sock.sendMessage(targetJid, {
       text:
         `🔑 *KODI YA KUBADILISHA NENOSIRI (PASSWORD RESET)*\n` +
@@ -3467,7 +3446,7 @@ app.post('/reset-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) =
 });
 
 // ==========================================
-// SUPER ADMIN DASHBOARD & PASSWORD RESET
+// SUPER ADMIN DASHBOARD
 // ==========================================
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
@@ -3745,7 +3724,6 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   }
 });
 
-// Reset a seller's password from SuperAdmin
 app.post('/superadmin/winga/reset-password', requireSuperAdmin, async (req, res) => {
   try {
     const wingaId = parseInt(req.body.wingaId, 10);
@@ -3852,7 +3830,7 @@ cron.schedule('0 8 * * *', async () => {
       if (!w.expiryDate) continue;
       const expiry = new Date(w.expiryDate);
       const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-      const chatId = await resolveWhatsAppRecipientJid(w.phone);
+      const chatId = buildDirectJid(w.phone);
       if (!chatId) continue;
 
       if (daysLeft <= 0 && w.status === 'active') {
