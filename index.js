@@ -59,6 +59,7 @@ let isWhatsappReady = false;
 let isReconnecting = false;
 let lastConnectedAt = null;
 let lastDisconnectCode = null;
+let reconnectTimer = null;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
@@ -281,17 +282,17 @@ app.get('/tz-locations.js', (req, res, next) => {
         "Tanga": {
           "Tanga Mjini": { "Ngamiani": ["Ngamiani Kati", "Chumbageni", "Nguvumali", "Msambweni"] },
           "Muheza": { "Muheza": ["Muheza", "Amani", "Lusotho"] },
-          "Korogwe": { "Korogwe": ["Korogwe Mjini", "Mombo", "Magoma"] },
+          "Korogwe": { "Korogwe Mjini", "Mombo", "Magoma"] },
           "Handeni": { "Chanika Handeni": ["Handeni Mjini", "Kibera", "Kwachaga"] },
-          "Pangani": { "Pangani": ["Pangani Mashariki", "Bweni", "Mwera"] },
-          "Lushoto": { "Lushoto": ["Lushoto Mjini", "Mlalo", "Soni"] },
+          "Pangani": { "Pangani Mashariki": ["Pangani", "Bweni", "Mwera"] },
+          "Lushoto": { "Lushoto Mjini", "Mlalo", "Soni"] },
           "Kilindi": { "Songe": ["Songe", "Kilindi", "Kwediboma"] }
         },
         "Morogoro": {
           "Morogoro Mjini": { "Mji Mkuu": ["Kichangani", "Mwembesongo", "Msamvu", "Mazimbu"] },
           "Morogoro Vijijini": { "Mkuyuni": ["Mkuyuni", "Kisaki", "Tawa"] },
           "Kilombero": { "Ifakara": ["Ifakara", "Mngeta", "Mang'ula"] },
-          "Kilosa": { "Kilosa": ["Kilosa Mjini", "Mikumi", "Kimamba"] },
+          "Kilosa": { "Kilosa Mjini", "Mikumi", "Kimamba"] },
           "Ulanga": { "Mahenge": ["Mahenge", "Lupiro", "Vigoi"] },
           "Gairo": { "Gairo": ["Gairo", "Chagongwe", "Rubeho"] },
           "Malinyi": { "Malinyi": ["Malinyi", "Mtimbira", "Igawa"] }
@@ -676,12 +677,41 @@ async function resolveWhatsAppRecipientJid(phoneOrJid) {
   return standardJid;
 }
 
+function scheduleReconnect(delayMs = 4000) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToWhatsApp();
+  }, delayMs);
+}
+
 async function connectToWhatsApp() {
   if (isReconnecting) return;
   isReconnecting = true;
 
   try {
-    const authDir = process.env.WA_AUTH_DIR || 'auth_info_baileys';
+    const authDir = process.env.WA_AUTH_DIR || path.join(__dirname, 'auth_info_baileys');
+
+    // Optional base64 session restore for ephemeral hosting if provided
+    if (process.env.WA_AUTH_SESSION_B64 && !fs.existsSync(authDir)) {
+      try {
+        fs.mkdirSync(authDir, { recursive: true });
+        const decoded = JSON.parse(
+          Buffer.from(process.env.WA_AUTH_SESSION_B64, 'base64').toString('utf8')
+        );
+        for (const [fname, content] of Object.entries(decoded || {})) {
+          const safeName = path.basename(fname);
+          fs.writeFileSync(
+            path.join(authDir, safeName),
+            typeof content === 'string' ? content : JSON.stringify(content)
+          );
+        }
+        console.log('✅ Restored WhatsApp session files from WA_AUTH_SESSION_B64');
+      } catch (b64Err) {
+        console.warn('⚠️ Could not restore WA_AUTH_SESSION_B64:', b64Err.message);
+      }
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     let version;
     try {
@@ -691,18 +721,30 @@ async function connectToWhatsApp() {
       console.warn('⚠️ Could not fetch latest Baileys version, using default:', vErr.message);
     }
 
+    if (sock && sock.ev && typeof sock.ev.removeAllListeners === 'function') {
+      try {
+        sock.ev.removeAllListeners('connection.update');
+        sock.ev.removeAllListeners('creds.update');
+        sock.ev.removeAllListeners('messages.upsert');
+      } catch (e) {}
+    }
+
     sock = makeWASocket({
       ...(version ? { version } : {}),
       auth: state,
       printQRInTerminal: true,
       logger: pino({ level: 'silent' }),
       browser: ['WingaShop', 'Chrome', '1.0.0'],
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
       markOnlineOnConnect: false
     });
 
     sock.ev.on('connection.update', update => {
       const { connection, lastDisconnect, qr } = update;
       if (qr) {
+        isReconnecting = false;
         console.log('⚡ Scan this QR Code with WhatsApp:');
         qrcode.generate(qr, { small: true });
       }
@@ -716,7 +758,8 @@ async function connectToWhatsApp() {
           `⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`
         );
         if (shouldReconnect) {
-          setTimeout(() => connectToWhatsApp(), 3000);
+          const retryDelay = statusCode === 408 ? 6000 : 3500;
+          scheduleReconnect(retryDelay);
         } else {
           console.error(
             '❌ WhatsApp session logged out. Clear auth folder and scan QR again.'
@@ -725,6 +768,7 @@ async function connectToWhatsApp() {
       } else if (connection === 'open') {
         isReconnecting = false;
         isWhatsappReady = true;
+        lastDisconnectCode = null;
         lastConnectedAt = new Date().toISOString();
         console.log('✅ Winga WhatsApp Bot (Baileys) is connected and live!');
       }
@@ -733,9 +777,9 @@ async function connectToWhatsApp() {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      if (type !== 'notify' && type !== 'append') return;
       for (const msg of messages) {
-        if (!msg.message || msg.key.fromMe) continue;
+        if (!msg.message) continue;
 
         const remoteJid = msg.key.remoteJid;
         if (
@@ -749,6 +793,18 @@ async function connectToWhatsApp() {
         const text = extractIncomingText(msg);
         if (!text) continue;
         const lowerText = text.toLowerCase();
+
+        // Ignore bot's own automated replies to prevent infinite loops
+        if (
+          msg.key.fromMe &&
+          (lowerText.startsWith('🛒 *oda yako imepokelewa!*') ||
+            lowerText.startsWith('❌ samahani, bidhaa') ||
+            lowerText.startsWith('❌ tafadhali taja namba') ||
+            lowerText.startsWith('karibu wingashop!') ||
+            lowerText.startsWith('🎉 *ahsante sana kwa feedback'))
+        ) {
+          continue;
+        }
 
         // 1. Feedback command via WhatsApp: !maoni [orderId] [1-5] [comment]
         if (lowerText.startsWith('!maoni')) {
@@ -802,6 +858,7 @@ async function connectToWhatsApp() {
           let location = 'Haikutajwa';
           let phone = normalizePhone(senderDigits) || senderDigits;
           let notes = '';
+          let quotedProductName = '';
           let orderItems = [];
 
           const lines = text
@@ -817,7 +874,10 @@ async function connectToWhatsApp() {
 
           for (const line of lines.slice(1)) {
             const lower = line.toLowerCase();
-            if (lower.includes('simu:')) {
+            if (lower.includes('bidhaa:')) {
+              const val = line.replace(/^.*?bidhaa:\s*/i, '').trim();
+              if (val) quotedProductName = val;
+            } else if (lower.includes('simu:')) {
               const val = line.replace(/^.*?simu:\s*/i, '').trim();
               if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
             } else if (lower.includes('eneo:')) {
@@ -906,20 +966,37 @@ async function connectToWhatsApp() {
             }
           }
 
-          if (orderItems.length === 0) {
+          if (orderItems.length === 0 && !quotedProductName) {
             await sock.sendMessage(remoteJid, {
               text: `❌ Tafadhali taja namba ya bidhaa (mfano: *!agiza 1*) au chagua bidhaa hapa:\n${PUBLIC_URL}/catalog`
             });
             continue;
           }
 
+          if (orderItems.length === 0 && quotedProductName) {
+            orderItems.push({
+              id: null,
+              size: defaultSize,
+              color: defaultColor,
+              qty: defaultQty
+            });
+          }
+
           const createdReceipts = [];
           const missingIds = [];
 
           for (const item of orderItems) {
-            const product = await db('products').where({ id: item.id }).first();
+            let product = null;
+            if (item.id) {
+              product = await db('products').where({ id: item.id }).first();
+            }
+            if (!product && quotedProductName) {
+              product = await db('products')
+                .whereRaw('LOWER(TRIM(name)) = ?', [quotedProductName.trim().toLowerCase()])
+                .first();
+            }
             if (!product) {
-              missingIds.push(item.id);
+              missingIds.push(item.id || quotedProductName);
               continue;
             }
 
@@ -979,7 +1056,7 @@ async function connectToWhatsApp() {
 
           if (createdReceipts.length === 0) {
             await sock.sendMessage(remoteJid, {
-              text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya:\n${PUBLIC_URL}/catalog`
+              text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya kuchagua bidhaa zilizopo:\n${PUBLIC_URL}/catalog`
             });
             continue;
           }
@@ -1011,7 +1088,7 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        // 3. Greeting / Catalog shortcut
+        // 3. Greeting / Catalog shortcut (only when not sent by bot itself)
         const greetingKeywords = [
           'hi',
           'hello',
@@ -1027,6 +1104,7 @@ async function connectToWhatsApp() {
           'niaje'
         ];
         if (
+          !msg.key.fromMe &&
           greetingKeywords.some(
             keyword => lowerText === keyword || lowerText.startsWith(keyword + ' ')
           )
@@ -1042,7 +1120,7 @@ async function connectToWhatsApp() {
     isReconnecting = false;
     isWhatsappReady = false;
     console.error('❌ connectToWhatsApp error:', err);
-    setTimeout(() => connectToWhatsApp(), 5000);
+    scheduleReconnect(5000);
   }
 }
 
@@ -1123,8 +1201,12 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Bot status check route
+// Bot status & manual reconnect helper route
 app.get('/bot-status', (req, res) => {
+  if (req.query.reconnect === '1' && !isBotSocketReady()) {
+    isReconnecting = false;
+    scheduleReconnect(500);
+  }
   res.json({
     ready: isBotSocketReady(),
     isWhatsappReady,
@@ -1203,7 +1285,6 @@ app.get('/catalog', async (req, res) => {
         const sellerLocation =
           matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
 
-        // STRICT: Only reviews for THIS specific product
         const productOnlyReviews = getReviewsForProduct(p, allOrders, allReviews);
         const avgRating =
           productOnlyReviews.length > 0
@@ -3254,12 +3335,14 @@ app.get('/forgot-password', (req, res) => {
 app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) => {
   try {
     if (!isBotSocketReady()) {
+      isReconnecting = false;
+      scheduleReconnect(500);
       return res
         .status(503)
         .send(
           `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
             `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
-            `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code ikiwa inaonekana) na subiri sekunde chache kisha ujaribu tena.</p>` +
+            `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code kwenye server logs ikiwa inaonekana) na subiri sekunde chache kisha ujaribu tena.</p>` +
             `<p style="font-size:12px;color:#777;">Status: ready=${isBotSocketReady()}, reconnecting=${isReconnecting}, lastCode=${lastDisconnectCode || 'none'}</p>` +
             `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
             `</div>`
