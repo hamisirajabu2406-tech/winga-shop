@@ -26,6 +26,7 @@ cloudinary.config({
 
 let sock = null;
 let isWhatsappReady = false;
+let isReconnecting = false;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
@@ -66,6 +67,10 @@ function maskPhone(phone) {
   const clean = String(phone || '').replace(/\D/g, '');
   if (clean.length < 7) return clean || '-';
   return clean.slice(0, 5) + '****' + clean.slice(-3);
+}
+
+function isHttpUrl(str) {
+  return typeof str === 'string' && /^https?:\/\//i.test(str.trim());
 }
 
 if (process.env.NODE_ENV === 'production') {
@@ -321,7 +326,6 @@ app.get('/tz-locations.js', (req, res, next) => {
   `);
 });
 
-// Landing Page with Contact Us & About Us
 app.get(['/', '/index.html'], (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   fs.readFile(indexPath, 'utf8', (err, html) => {
@@ -380,7 +384,6 @@ app.use(session({
 
 app.use('/api', orderRoutes);
 
-// Multer Memory Storage (Max 10MB per image, max 4 images)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -522,270 +525,294 @@ function extractIncomingText(msg) {
   ).trim();
 }
 
-// Initialize Baileys WhatsApp Connection
+function isBotSocketReady() {
+  return Boolean(sock && isWhatsappReady && sock.user);
+}
+
 async function connectToWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+  if (isReconnecting) return;
+  isReconnecting = true;
 
-  sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: true,
-    logger: pino({ level: 'silent' })
-  });
+  try {
+    const authDir = process.env.WA_AUTH_DIR || 'auth_info_baileys';
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      console.log('⚡ Scan this QR Code with WhatsApp:');
-      qrcode.generate(qr, { small: true });
-    }
-    if (connection === 'close') {
-      isWhatsappReady = false;
-      const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.warn('⚠️ WhatsApp connection closed, reconnecting:', shouldReconnect);
-      if (shouldReconnect) connectToWhatsApp();
-    } else if (connection === 'open') {
-      console.log('✅ Winga WhatsApp Bot (Baileys) is connected and live!');
-      isWhatsappReady = true;
-    }
-  });
+    sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: true,
+      logger: pino({ level: 'silent' }),
+      browser: ['WingaShop', 'Chrome', '1.0.0']
+    });
 
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
-
-      const remoteJid = msg.key.remoteJid;
-      const text = extractIncomingText(msg);
-      if (!text) continue;
-      const lowerText = text.toLowerCase();
-
-      if (lowerText.startsWith('!maoni')) {
-        const parts = text.split(/\s+/);
-        const orderId = parseInt(parts[1], 10);
-        const rating = parseInt(parts[2], 10);
-        const comment = parts.slice(3).join(' ');
-        if (!orderId || isNaN(rating) || rating < 1 || rating > 5 || !comment) {
-          await sock.sendMessage(remoteJid, { text: '❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*' });
-          continue;
-        }
-        const orderExists = await db('orders').where({ orderId }).first();
-        if (!orderExists) {
-          await sock.sendMessage(remoteJid, { text: `❌ Haikuwezekana kupata Oda #${orderId}.` });
-          continue;
-        }
-        const existingReview = await db('reviews').where({ orderId }).first();
-        if (existingReview) {
-          await db('reviews').where({ orderId }).update({ rating, comment: comment.trim(), date: new Date() });
-        } else {
-          await db('reviews').insert({ orderId, rating, comment: comment.trim(), date: new Date() });
-        }
-        await sock.sendMessage(remoteJid, { text: `🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.` });
-        continue;
+    sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        console.log('⚡ Scan this QR Code with WhatsApp:');
+        qrcode.generate(qr, { small: true });
       }
+      if (connection === 'close') {
+        isWhatsappReady = false;
+        isReconnecting = false;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        console.warn(`⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`);
+        if (shouldReconnect) {
+          setTimeout(() => connectToWhatsApp(), 3000);
+        } else {
+          console.error('❌ WhatsApp session logged out. Clear auth folder and scan QR again.');
+        }
+      } else if (connection === 'open') {
+        isReconnecting = false;
+        isWhatsappReady = true;
+        console.log('✅ Winga WhatsApp Bot (Baileys) is connected and live!');
+      }
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+      for (const msg of messages) {
+        if (!msg.message || msg.key.fromMe) continue;
+
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') continue;
+
+        const text = extractIncomingText(msg);
+        if (!text) continue;
+        const lowerText = text.toLowerCase();
+
+        if (lowerText.startsWith('!maoni')) {
+          const parts = text.split(/\s+/);
+          const orderId = parseInt(parts[1], 10);
+          const rating = parseInt(parts[2], 10);
+          const comment = parts.slice(3).join(' ');
+          if (!orderId || isNaN(rating) || rating < 1 || rating > 5 || !comment) {
+            await sock.sendMessage(remoteJid, { text: '❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*' });
+            continue;
+          }
+          const orderExists = await db('orders').where({ orderId }).first();
+          if (!orderExists) {
+            await sock.sendMessage(remoteJid, { text: `❌ Haikuwezekana kupata Oda #${orderId}.` });
+            continue;
+          }
+          const existingReview = await db('reviews').where({ orderId }).first();
+          if (existingReview) {
+            await db('reviews').where({ orderId }).update({ rating, comment: comment.trim(), date: new Date() });
+          } else {
+            await db('reviews').insert({ orderId, rating, comment: comment.trim(), date: new Date() });
+          }
+          await sock.sendMessage(remoteJid, { text: `🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.` });
+          continue;
+        }
 
         if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
-        let location = 'Haikutajwa';
-        let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
-        let notes = '';
-        let orderItems = [];
+          let location = 'Haikutajwa';
+          let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace('@lid', '');
+          let notes = '';
+          let orderItems = [];
 
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const firstLine = lines[0] || '';
-        const afterCommand = firstLine.replace(/^!(agiza|order)\s*/i, '').trim();
+          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          const firstLine = lines[0] || '';
+          const afterCommand = firstLine.replace(/^!(agiza|order)\s*/i, '').trim();
 
-        let defaultSize = 'Standard';
-        let defaultColor = 'Kama pichani';
-        let defaultQty = 1;
+          let defaultSize = 'Standard';
+          let defaultColor = 'Kama pichani';
+          let defaultQty = 1;
 
-        for (const line of lines.slice(1)) {
-          const lower = line.toLowerCase();
-          if (lower.includes('simu:')) {
-            const val = line.replace(/^.*?simu:\s*/i, '').trim();
-            if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
-          } else if (lower.includes('eneo:')) {
-            const val = line.replace(/^.*?eneo:\s*/i, '').trim();
-            if (val && val.toLowerCase() !== 'haikutajwa') location = val;
-          } else if (lower.includes('maelezo:')) {
-            const val = line.replace(/^.*?maelezo:\s*/i, '').trim();
-            if (val && val.toLowerCase() !== 'hakuna') notes = val;
-          } else if (lower.includes('saizi:') || lower.includes('size:')) {
-            const val = line.replace(/^.*?(saizi|size):\s*/i, '').trim();
-            if (val) defaultSize = val;
-          } else if (lower.includes('rangi:') || lower.includes('color:')) {
-            const val = line.replace(/^.*?(rangi|color):\s*/i, '').trim();
-            if (val && val.toLowerCase() !== 'haijatajwa') defaultColor = val;
-          } else if (lower.includes('idadi:')) {
-            const q = parseInt(line.replace(/^.*?idadi:\s*/i, '').trim(), 10);
-            if (!isNaN(q) && q > 0) defaultQty = q;
-          } else if (/^item\s*\d*\s*:/i.test(line)) {
-            const itemBody = line.replace(/^item\s*\d*\s*:/i, '').trim();
-            const segs = itemBody.split('|').map(s => s.trim());
-            const idMatch = segs[0].match(/#?(\d+)/);
-            if (idMatch) {
-              let itSize = defaultSize, itColor = defaultColor, itQty = defaultQty;
-              segs.slice(1).forEach(s => {
-                if (/^(size|saizi):/i.test(s)) {
-                  itSize = s.replace(/^(size|saizi):\s*/i, '').trim() || 'Standard';
-                }
-                if (/^(rangi|color):/i.test(s)) {
-                  itColor = s.replace(/^(rangi|color):\s*/i, '').trim() || 'Kama pichani';
-                }
-                if (/^idadi:/i.test(s)) {
-                  const q = parseInt(s.replace(/^idadi:\s*/i, '').trim(), 10);
-                  if (!isNaN(q) && q > 0) itQty = q;
-                }
-              });
-              orderItems.push({ id: parseInt(idMatch[1], 10), size: itSize, color: itColor, qty: itQty });
+          for (const line of lines.slice(1)) {
+            const lower = line.toLowerCase();
+            if (lower.includes('simu:')) {
+              const val = line.replace(/^.*?simu:\s*/i, '').trim();
+              if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
+            } else if (lower.includes('eneo:')) {
+              const val = line.replace(/^.*?eneo:\s*/i, '').trim();
+              if (val && val.toLowerCase() !== 'haikutajwa') location = val;
+            } else if (lower.includes('maelezo:')) {
+              const val = line.replace(/^.*?maelezo:\s*/i, '').trim();
+              if (val && val.toLowerCase() !== 'hakuna') notes = val;
+            } else if (lower.includes('saizi:') || lower.includes('size:')) {
+              const val = line.replace(/^.*?(saizi|size):\s*/i, '').trim();
+              if (val) defaultSize = val;
+            } else if (lower.includes('rangi:') || lower.includes('color:')) {
+              const val = line.replace(/^.*?(rangi|color):\s*/i, '').trim();
+              if (val && val.toLowerCase() !== 'haijatajwa') defaultColor = val;
+            } else if (lower.includes('idadi:')) {
+              const q = parseInt(line.replace(/^.*?idadi:\s*/i, '').trim(), 10);
+              if (!isNaN(q) && q > 0) defaultQty = q;
+            } else if (/^item\s*\d*\s*:/i.test(line)) {
+              const itemBody = line.replace(/^item\s*\d*\s*:/i, '').trim();
+              const segs = itemBody.split('|').map(s => s.trim());
+              const idMatch = segs[0].match(/#?(\d+)/);
+              if (idMatch) {
+                let itSize = defaultSize, itColor = defaultColor, itQty = defaultQty;
+                segs.slice(1).forEach(s => {
+                  if (/^(size|saizi):/i.test(s)) {
+                    itSize = s.replace(/^(size|saizi):\s*/i, '').trim() || 'Standard';
+                  }
+                  if (/^(rangi|color):/i.test(s)) {
+                    itColor = s.replace(/^(rangi|color):\s*/i, '').trim() || 'Kama pichani';
+                  }
+                  if (/^idadi:/i.test(s)) {
+                    const q = parseInt(s.replace(/^idadi:\s*/i, '').trim(), 10);
+                    if (!isNaN(q) && q > 0) itQty = q;
+                  }
+                });
+                orderItems.push({ id: parseInt(idMatch[1], 10), size: itSize, color: itColor, qty: itQty });
+              }
             }
           }
-        }
 
-        if (orderItems.length === 0 && afterCommand) {
-          if (afterCommand.includes('|')) {
-            const payload = afterCommand.split('|');
-            const pidMatch = payload[0].match(/#?(\d+)/);
-            if (pidMatch) {
-              orderItems.push({
-                id: parseInt(pidMatch[1], 10),
-                size: defaultSize,
-                color: defaultColor,
-                qty: defaultQty
-              });
-            }
-            if (payload[1]) location = payload[1].trim();
-            if (payload[2]) phone = payload[2].trim();
-          } else {
-            // Chukua ID za bidhaa zilizotenganishwa kwa koma (mfano: "5" au "5, 6"), bila kuchukua namba ya simu
-            const commaParts = afterCommand.split(',');
-            for (const part of commaParts) {
-              const m = part.trim().match(/^#?(\d+)$/);
-              if (m) {
+          if (orderItems.length === 0 && afterCommand) {
+            if (afterCommand.includes('|')) {
+              const payload = afterCommand.split('|');
+              const pidMatch = payload[0].match(/#?(\d+)/);
+              if (pidMatch) {
                 orderItems.push({
-                  id: parseInt(m[1], 10),
+                  id: parseInt(pidMatch[1], 10),
                   size: defaultSize,
                   color: defaultColor,
                   qty: defaultQty
                 });
               }
-            }
-            // Ikiwa hakukuwa na koma, chukua namba ya kwanza ya bidhaa baada ya !agiza
-            if (orderItems.length === 0) {
-              const firstNumMatch = afterCommand.match(/#?(\d+)/);
-              if (firstNumMatch) {
-                orderItems.push({
-                  id: parseInt(firstNumMatch[1], 10),
-                  size: defaultSize,
-                  color: defaultColor,
-                  qty: defaultQty
-                });
+              if (payload[1]) location = payload[1].trim();
+              if (payload[2]) phone = payload[2].trim();
+            } else {
+              const commaParts = afterCommand.split(',');
+              for (const part of commaParts) {
+                const m = part.trim().match(/^#?(\d+)$/);
+                if (m) {
+                  orderItems.push({
+                    id: parseInt(m[1], 10),
+                    size: defaultSize,
+                    color: defaultColor,
+                    qty: defaultQty
+                  });
+                }
+              }
+              if (orderItems.length === 0) {
+                const firstNumMatch = afterCommand.match(/#?(\d+)/);
+                if (firstNumMatch) {
+                  orderItems.push({
+                    id: parseInt(firstNumMatch[1], 10),
+                    size: defaultSize,
+                    color: defaultColor,
+                    qty: defaultQty
+                  });
+                }
               }
             }
           }
-        }
 
-        if (orderItems.length === 0) {
-          await sock.sendMessage(remoteJid, { text: '❌ Tafadhali taja namba ya bidhaa (mfano: *!agiza 5*) au chagua bidhaa kutoka kwenye Catalog.' });
-          continue;
-        }
-
-        const createdReceipts = [];
-        const missingIds = [];
-
-        for (const item of orderItems) {
-          const product = await db('products').where({ id: item.id }).first();
-          if (!product) {
-            missingIds.push(item.id);
+          if (orderItems.length === 0) {
+            await sock.sendMessage(remoteJid, { text: `❌ Tafadhali taja namba ya bidhaa (mfano: *!agiza 5*) au chagua bidhaa hapa:\n${PUBLIC_URL}/catalog` });
             continue;
           }
 
-          const unitBuying = Number(product.buyingPrice || 0);
-          const unitSelling = Number(product.sellingPrice || product.price || 0);
-          const totalBuying = unitBuying * item.qty;
-          const totalSelling = unitSelling * item.qty;
+          const createdReceipts = [];
+          const missingIds = [];
 
-          let detailsSummary = product.name;
-          const extras = [];
-          if (item.qty > 1) extras.push(`x${item.qty}`);
-          if (item.size && item.size !== 'Standard') extras.push(`Size: ${item.size}`);
-          if (item.color) extras.push(`Rangi: ${item.color}`);
-          if (notes) extras.push(`Maelezo: ${notes}`);
-          if (extras.length > 0) detailsSummary += ` (${extras.join(', ')})`;
+          for (const item of orderItems) {
+            const product = await db('products').where({ id: item.id }).first();
+            if (!product) {
+              missingIds.push(item.id);
+              continue;
+            }
 
-          const maxRows = await db('orders').max('orderId as maxId');
-          const rawMax = maxRows && maxRows[0] ? (maxRows[0].maxId ?? Object.values(maxRows[0])[0]) : 0;
-          const nextOrderId = (rawMax ? Number(rawMax) : 0) + 1;
+            const unitBuying = Number(product.buyingPrice || 0);
+            const unitSelling = Number(product.sellingPrice || product.price || 0);
+            const totalBuying = unitBuying * item.qty;
+            const totalSelling = unitSelling * item.qty;
 
-          const newOrder = {
-            orderId: nextOrderId,
-            wingaId: product.wingaId || 1,
-            productId: product.id,
-            productName: detailsSummary,
-            buyingPrice: totalBuying,
-            sellingPrice: totalSelling,
-            customerPhone: phone,
-            location: location,
-            senderJid: remoteJid,
-            status: 'Pending',
-            date: new Date()
-          };
+            let detailsSummary = product.name;
+            const extras = [];
+            if (item.qty > 1) extras.push(`x${item.qty}`);
+            if (item.size && item.size !== 'Standard') extras.push(`Size: ${item.size}`);
+            if (item.color) extras.push(`Rangi: ${item.color}`);
+            if (notes) extras.push(`Maelezo: ${notes}`);
+            if (extras.length > 0) detailsSummary += ` (${extras.join(', ')})`;
 
-          await insertOrderSafe(newOrder);
-          createdReceipts.push({ order: newOrder, product });
+            const maxRows = await db('orders').max('orderId as maxId');
+            const rawMax = maxRows && maxRows[0] ? (maxRows[0].maxId ?? Object.values(maxRows[0])[0]) : 0;
+            const nextOrderId = (rawMax ? Number(rawMax) : 0) + 1;
 
-          await notifyWinga(newOrder, product);
+            const newOrder = {
+              orderId: nextOrderId,
+              wingaId: product.wingaId || 1,
+              productId: product.id,
+              productName: detailsSummary,
+              buyingPrice: totalBuying,
+              sellingPrice: totalSelling,
+              customerPhone: phone,
+              location: location,
+              senderJid: remoteJid,
+              status: 'Pending',
+              date: new Date()
+            };
 
-          const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
-          if (orderWinga && isSmsEnabled(orderWinga.sms_enabled) && orderWinga.phone) {
-            sendSellerOrderSms({
-              phone: orderWinga.phone,
-              sellerName: orderWinga.name,
-              orderId: newOrder.orderId,
-              totalAmount: newOrder.sellingPrice,
-            }).catch((err) => console.error('[SMS Hook] Imeshindwa kutuma SMS:', err));
+            await insertOrderSafe(newOrder);
+            createdReceipts.push({ order: newOrder, product });
+
+            await notifyWinga(newOrder, product);
+
+            const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
+            if (orderWinga && isSmsEnabled(orderWinga.sms_enabled) && orderWinga.phone) {
+              sendSellerOrderSms({
+                phone: orderWinga.phone,
+                sellerName: orderWinga.name,
+                orderId: newOrder.orderId,
+                totalAmount: newOrder.sellingPrice,
+              }).catch((err) => console.error('[SMS Hook] Imeshindwa kutuma SMS:', err));
+            }
           }
-        }
 
-        if (createdReceipts.length === 0) {
-          await sock.sendMessage(remoteJid, { text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya kuchagua bidhaa zilizopo.` });
+          if (createdReceipts.length === 0) {
+            await sock.sendMessage(remoteJid, {
+              text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya kuchagua bidhaa zilizopo:\n${PUBLIC_URL}/catalog`
+            });
+            continue;
+          }
+
+          let grandTotal = 0;
+          const linesOut = createdReceipts.map(({ order }) => {
+            grandTotal += Number(order.sellingPrice || 0);
+            return `🔖 *Oda #${order.orderId}:* ${order.productName} — TSh ${Number(order.sellingPrice).toLocaleString()}\n   🔗 Fuatilia (Weka namba yako kuhakiki): ${PUBLIC_URL}/track?id=${order.orderId}`;
+          }).join('\n\n');
+
+          let replyMsg =
+            `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
+            `${linesOut}\n\n` +
+            `💰 *Jumla Kuu:* TSh ${grandTotal.toLocaleString()}\n` +
+            `📞 *Simu:* ${phone}\n` +
+            `📍 *Eneo:* ${location}\n` +
+            `📌 *Status:* 🟡 Pending`;
+
+          if (missingIds.length > 0) {
+            replyMsg += `\n\n⚠️ Bidhaa ambazo hazikupatikana: #${missingIds.join(', #')}`;
+          }
+
+          await sock.sendMessage(remoteJid, { text: replyMsg });
           continue;
         }
 
-        let grandTotal = 0;
-        const linesOut = createdReceipts.map(({ order }) => {
-          grandTotal += Number(order.sellingPrice || 0);
-          return `🔖 *Oda #${order.orderId}:* ${order.productName} — TSh ${Number(order.sellingPrice).toLocaleString()}\n   🔗 Fuatilia (Weka namba yako kuhakiki): ${PUBLIC_URL}/track?id=${order.orderId}`;
-        }).join('\n\n');
-
-        let replyMsg =
-          `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
-          `${linesOut}\n\n` +
-          `💰 *Jumla Kuu:* TSh ${grandTotal.toLocaleString()}\n` +
-          `📞 *Simu:* ${phone}\n` +
-          `📍 *Eneo:* ${location}\n` +
-          `📌 *Status:* 🟡 Pending`;
-
-        if (missingIds.length > 0) {
-          replyMsg += `\n\n⚠️ Bidhaa ambazo hazikupatikana: #${missingIds.join(', #')}`;
+        const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
+        if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
+          await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${PUBLIC_URL}/catalog` });
+          continue;
         }
-
-        await sock.sendMessage(remoteJid, { text: replyMsg });
-        continue;
       }
-
-      const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
-      if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
-        await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${PUBLIC_URL}/catalog` });
-        continue;
-      }
-    }
-  });
+    });
+  } catch (err) {
+    isReconnecting = false;
+    isWhatsappReady = false;
+    console.error('❌ connectToWhatsApp error:', err);
+    setTimeout(() => connectToWhatsApp(), 5000);
+  }
 }
 
 async function notifyShopCustomers(winga) {
   try {
-    if (!isWhatsappReady || !sock || !winga) return;
+    if (!isBotSocketReady() || !winga) return;
 
     const now = Date.now();
     const lastSent = shopBroadcastCooldown.get(winga.id) || 0;
@@ -795,7 +822,7 @@ async function notifyShopCustomers(winga) {
     }
 
     const shopOrders = await db('orders').where({ wingaId: winga.id });
-    const customerJids = [...new Set(shopOrders.map(o => o.senderJid).filter(Boolean))];
+    const customerJids = [...new Set(shopOrders.map(o => o.senderJid).filter(j => j && j.endsWith('@s.whatsapp.net')))];
     if (customerJids.length === 0) return;
 
     shopBroadcastCooldown.set(winga.id, now);
@@ -818,12 +845,13 @@ async function notifyShopCustomers(winga) {
 
 async function notifyWinga(order, product) {
   try {
-    if (!isWhatsappReady || !sock) return;
+    if (!isBotSocketReady()) return;
     const winga = await db('wingas').where({ id: order.wingaId }).first();
     if (!winga || !winga.phone) return;
-    let phone = winga.phone.trim().replace('+', '');
+    let phone = winga.phone.trim().replace(/\D/g, '');
     if (phone.startsWith('0')) phone = '255' + phone.slice(1);
     const wingaChatId = phone + '@s.whatsapp.net';
+
     const alertMessage =
       `🔔 *ODA MPYA IMETOKA KWENYE DUKA YAKO!* 🛍️\n` +
       `-----------------------------------\n` +
@@ -836,8 +864,13 @@ async function notifyWinga(order, product) {
       `📲 Angalia dashboard yako hapa: ${PUBLIC_URL}/admin`;
 
     const images = getProductImages(product);
-    if (images.length > 0 && images[0]) {
-      await sock.sendMessage(wingaChatId, { image: { url: images[0] }, caption: alertMessage });
+    if (images.length > 0 && isHttpUrl(images[0])) {
+      try {
+        await sock.sendMessage(wingaChatId, { image: { url: images[0] }, caption: alertMessage });
+      } catch (imgErr) {
+        console.warn('⚠️ Image alert failed, sending text fallback:', imgErr.message);
+        await sock.sendMessage(wingaChatId, { text: alertMessage });
+      }
     } else {
       await sock.sendMessage(wingaChatId, { text: alertMessage });
     }
@@ -2780,21 +2813,19 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password
+// Forgot & Reset Password (with improved WhatsApp connection check)
 app.get('/forgot-password', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:320px;"><h2>🔑 Umesahau Nenosiri?</h2><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;">← Rudi Login</a></div></body></html>`);
+  res.send(`<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:340px;"><h2>🔑 Umesahau Nenosiri?</h2><p style="font-size:12px;color:#555;">Weka namba yako ya simu kupokea OTP WhatsApp.</p><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;border:1px solid #4092e5;border-radius:4px;box-sizing:border-box;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;border-radius:4px;cursor:pointer;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;color:#007bff;text-decoration:none;font-size:13px;">← Rudi Login</a></div></body></html>`);
 });
 
 app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) => {
   try {
-    const isConnected = Boolean(sock && (isWhatsappReady || sock.user));
-    if (!isConnected) {
+    if (!isBotSocketReady()) {
       return res.status(503).send(
-        `<div style="text-align:center;padding:35px;font-family:sans-serif;">` +
+        `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
         `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
-        `<p>Kwa sasa WhatsApp bot kwenye server haijawa tayari kutuma OTP (inawezekana inaunganisha au inahitaji ku-scan QR kwenye logs/terminal).</p>` +
-        `<p>Subiri sekunde 15–30 kisha ujaribu tena, au wasiliana na Admin.</p>` +
-        `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;">Jaribu Tena</a>` +
+        `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code ikiwa inaonekana) na subiri sekunde 15–30 kisha ujaribu tena.</p>` +
+        `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
         `</div>`
       );
     }
@@ -2802,13 +2833,25 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
     const rawPhone = (req.body.phone || '').trim();
     let cleanedPhone = rawPhone.replace(/\D/g, '');
     if (cleanedPhone.startsWith('0')) cleanedPhone = '255' + cleanedPhone.slice(1);
+    const localZeroPhone = cleanedPhone.startsWith('255') ? '0' + cleanedPhone.slice(3) : rawPhone;
 
-    const winga = await db('wingas').where({ phone: rawPhone }).orWhere({ phone: cleanedPhone }).first();
-    if (!winga) return res.send('❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>');
+    const winga = await db('wingas')
+      .where({ phone: rawPhone })
+      .orWhere({ phone: cleanedPhone })
+      .orWhere({ phone: localZeroPhone })
+      .first();
+
+    if (!winga) {
+      return res.send('❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>');
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await db('password_resets').where({ phone: winga.phone }).del();
-    await db('password_resets').insert({ phone: winga.phone, otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+    await db('password_resets').insert({
+      phone: winga.phone,
+      otp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+    });
 
     await sock.sendMessage(`${cleanedPhone}@s.whatsapp.net`, {
       text: `🔑 Kodi yako ya OTP ni: *${otp}* (Inaisha baada ya dakika 10).`
@@ -2839,7 +2882,7 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
       </script>
     </head>
     <body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;">
-      <div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:320px;">
+      <div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:340px;">
         <h2>🔐 Weka Nenosiri Jipya</h2>
         <p style="font-size:12px;color:#28a745;font-weight:bold;">✅ OTP imetumwa WhatsApp.</p>
         <form action="/reset-password" method="POST">
@@ -2853,7 +2896,7 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
             <input type="password" name="confirmPassword" id="resetConfirmPass" placeholder="Rudia Nenosiri" required>
             <button type="button" class="eye-btn" onclick="togglePassword('resetConfirmPass', this)">👁️</button>
           </div>
-          <button type="submit" style="background:#28a745;color:white;border:none;padding:12px;width:100%;font-weight:bold;border-radius:4px;margin-top:8px;">Hifadhi</button>
+          <button type="submit" style="background:#28a745;color:white;border:none;padding:12px;width:100%;font-weight:bold;border-radius:4px;margin-top:8px;cursor:pointer;">Hifadhi</button>
         </form>
       </div>
     </body>
