@@ -1,29 +1,59 @@
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
-const orderRoutes = require('./routes/orderRoutes');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('cloudinary').v2;
-const { sendSellerOrderSms } = require('./services/smsService');
 const db = require('./db');
+
+// Optional modules (loaded safely if present)
+let orderRoutes = null;
+try {
+  orderRoutes = require('./routes/orderRoutes');
+} catch (e) {
+  orderRoutes = null;
+}
+
+let sendSellerOrderSms = null;
+try {
+  ({ sendSellerOrderSms } = require('./services/smsService'));
+} catch (e) {
+  sendSellerOrderSms = null;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const PUBLIC_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://winga-shop.onrender.com').replace(/\/$/, '');
+const PUBLIC_URL = (
+  process.env.BASE_URL ||
+  process.env.RENDER_EXTERNAL_URL ||
+  'https://winga-shop.onrender.com'
+).replace(/\/$/, '');
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+// Configure Cloudinary if credentials exist
+if (
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+}
 
+// Global WhatsApp & System State
 let sock = null;
 let isWhatsappReady = false;
 let isReconnecting = false;
@@ -32,9 +62,54 @@ let lastDisconnectCode = null;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
-function rateLimitAuth(maxAttempts = 6, windowMs = 15 * 60 * 1000) {
+// SuperAdmin credentials (defaults to the two requested admin numbers)
+const SUPER_ADMINS = [
+  {
+    phone: (process.env.SUPERADMIN_PHONE_1 || '0678143403').trim(),
+    password: (process.env.SUPERADMIN_PASS_1 || 'SuperAdmin@0678').trim()
+  },
+  {
+    phone: (process.env.SUPERADMIN_PHONE_2 || '0745423403').trim(),
+    password: (process.env.SUPERADMIN_PASS_2 || 'SuperAdmin@0745').trim()
+  }
+];
+
+function normalizePhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('255') && digits.length >= 12) return digits;
+  if (digits.startsWith('0') && digits.length === 10) return '255' + digits.slice(1);
+  if (digits.length === 9) return '255' + digits;
+  return digits;
+}
+
+function phoneVariants(raw) {
+  const clean = String(raw || '').trim();
+  const digits = clean.replace(/\D/g, '');
+  const intl = normalizePhone(digits);
+  const localZero = intl.startsWith('255') ? '0' + intl.slice(3) : digits;
+  return [...new Set([clean, digits, intl, localZero].filter(Boolean))];
+}
+
+function isSamePhone(a, b) {
+  const varA = phoneVariants(a);
+  const varB = phoneVariants(b);
+  return varA.some(x => varB.includes(x));
+}
+
+function isSuperAdminLogin(identifier, password) {
+  if (!identifier || !password) return false;
+  return SUPER_ADMINS.some(
+    adm => isSamePhone(adm.phone, identifier) && password === adm.password
+  );
+}
+
+function rateLimitAuth(maxAttempts = 10, windowMs = 15 * 60 * 1000) {
   return (req, res, next) => {
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || 'unknown';
+    const ip =
+      req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+      req.ip ||
+      'unknown';
     const key = `${req.path}:${ip}`;
     const now = Date.now();
     const record = authAttempts.get(key) || { count: 0, resetAt: now + windowMs };
@@ -49,20 +124,27 @@ function rateLimitAuth(maxAttempts = 6, windowMs = 15 * 60 * 1000) {
 
     if (record.count > maxAttempts) {
       const minsLeft = Math.ceil((record.resetAt - now) / 60000);
-      return res.status(429).send(
-        `<div style="font-family:sans-serif;max-width:420px;margin:60px auto;padding:24px;border:1px solid #f5c2c7;background:#f8d7da;color:#842029;border-radius:10px;text-align:center;">` +
-        `<h3>Majaribio Mengi Sana</h3>` +
-        `<p>Tafadhali subiri dakika <strong>${minsLeft}</strong> kabla ya kujaribu tena.</p>` +
-        `<a href="/catalog" style="display:inline-block;margin-top:12px;color:#842029;font-weight:bold;">Rudi Kwenye Catalog</a>` +
-        `</div>`
-      );
+      return res
+        .status(429)
+        .send(
+          `<div style="font-family:sans-serif;max-width:420px;margin:60px auto;padding:24px;border:1px solid #f5c2c7;background:#f8d7da;color:#842029;border-radius:10px;text-align:center;">` +
+            `<h3>Majaribio Mengi Sana</h3>` +
+            `<p>Tafadhali subiri dakika <strong>${minsLeft}</strong> kabla ya kujaribu tena.</p>` +
+            `<a href="/catalog" style="display:inline-block;margin-top:12px;color:#842029;font-weight:bold;">Rudi Kwenye Catalog</a>` +
+            `</div>`
+        );
     }
     next();
   };
 }
 
 function isSmsEnabled(val) {
-  return val === true || val === 1 || String(val).toLowerCase() === 'true' || String(val) === '1';
+  return (
+    val === true ||
+    val === 1 ||
+    String(val).toLowerCase() === 'true' ||
+    String(val) === '1'
+  );
 }
 
 function maskPhone(phone) {
@@ -76,8 +158,13 @@ function isHttpUrl(str) {
 }
 
 if (process.env.NODE_ENV === 'production') {
-  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === 'winga-super-secret-key') {
-    console.error('❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!');
+  if (
+    !process.env.SESSION_SECRET ||
+    process.env.SESSION_SECRET === 'winga-super-secret-key'
+  ) {
+    console.error(
+      '❌ FATAL ERROR: SESSION_SECRET must be explicitly set to a secure string in production!'
+    );
     process.exit(1);
   }
 }
@@ -86,7 +173,7 @@ app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Dynamic /tz-locations.js fallback if not present in public/
+// Dynamic TZ location dataset helper
 app.get('/tz-locations.js', (req, res, next) => {
   const staticLocPath = path.join(__dirname, 'public', 'tz-locations.js');
   if (fs.existsSync(staticLocPath)) {
@@ -328,6 +415,7 @@ app.get('/tz-locations.js', (req, res, next) => {
   `);
 });
 
+// Landing Page
 app.get(['/', '/index.html'], (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   fs.readFile(indexPath, 'utf8', (err, html) => {
@@ -372,20 +460,25 @@ app.get(['/', '/index.html'], (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000
-  }
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000
+    }
+  })
+);
 
-app.use('/api', orderRoutes);
+if (orderRoutes) {
+  app.use('/api', orderRoutes);
+}
 
+// Multer Memory Upload for Product Images (up to 4 images)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -400,7 +493,11 @@ const upload = multer({
 async function uploadBuffersToCloudinary(files) {
   const urls = [];
   if (!files || files.length === 0) return urls;
-  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  if (
+    !process.env.CLOUDINARY_CLOUD_NAME ||
+    !process.env.CLOUDINARY_API_KEY ||
+    !process.env.CLOUDINARY_API_SECRET
+  ) {
     throw new Error('Cloudinary credentials hazijawekwa kwenye server');
   }
   for (const file of files) {
@@ -455,7 +552,8 @@ function getProductImages(product) {
   if (!raw) return [];
   let list = [];
   try {
-    const parsed = typeof raw === 'string' && raw.trim().startsWith('[') ? JSON.parse(raw) : raw;
+    const parsed =
+      typeof raw === 'string' && raw.trim().startsWith('[') ? JSON.parse(raw) : raw;
     list = Array.isArray(parsed) ? parsed : [parsed];
   } catch (e) {
     list = [raw];
@@ -475,7 +573,11 @@ function escapeHtml(str) {
 
 function buildLocationString(region, district, ward, street, customStreet) {
   const cleanWard = ward === '__OTHER_WARD__' ? '' : (ward || '').trim();
-  const finalStreet = (street === '__OTHER__' || ward === '__OTHER_WARD__' ? (customStreet || '') : (street || '')).trim();
+  const finalStreet = (
+    street === '__OTHER__' || ward === '__OTHER_WARD__'
+      ? customStreet || ''
+      : street || ''
+  ).trim();
   return [finalStreet, cleanWard, (district || '').trim(), (region || '').trim()]
     .filter(Boolean)
     .join(', ');
@@ -497,11 +599,35 @@ function findMatchedProductForOrder(order, productsList) {
   );
 }
 
+// Strict per-product review matcher so feedback never leaks across different products
+function getReviewsForProduct(product, allOrders, allReviews) {
+  if (!product || !Array.isArray(allOrders) || !Array.isArray(allReviews)) return [];
+  const prodNameLower = (product.name || '').trim().toLowerCase();
+
+  const matchingOrderIds = new Set(
+    allOrders
+      .filter(o => {
+        if (Number(o.wingaId) !== Number(product.wingaId)) return false;
+        if (o.productId !== undefined && o.productId !== null && Number(o.productId) > 0) {
+          return Number(o.productId) === Number(product.id);
+        }
+        const orderProdBase = (o.productName || '').split('(')[0].trim().toLowerCase();
+        return Boolean(prodNameLower && orderProdBase === prodNameLower);
+      })
+      .map(o => Number(o.orderId))
+  );
+
+  return allReviews.filter(r => matchingOrderIds.has(Number(r.orderId)));
+}
+
 async function insertOrderSafe(orderObj) {
   try {
     await db('orders').insert(orderObj);
   } catch (err) {
-    if (orderObj.productId !== undefined && /productId|Unknown column/i.test(err.message || '')) {
+    if (
+      orderObj.productId !== undefined &&
+      /productId|Unknown column/i.test(err.message || '')
+    ) {
       const fallbackObj = { ...orderObj };
       delete fallbackObj.productId;
       await db('orders').insert(fallbackObj);
@@ -531,6 +657,25 @@ function isBotSocketReady() {
   return Boolean(sock && isWhatsappReady && sock.user);
 }
 
+async function resolveWhatsAppRecipientJid(phoneOrJid) {
+  if (!phoneOrJid) return null;
+  if (String(phoneOrJid).includes('@')) return String(phoneOrJid).trim();
+  const intl = normalizePhone(phoneOrJid);
+  if (!intl) return null;
+  const standardJid = `${intl}@s.whatsapp.net`;
+  if (sock && typeof sock.onWhatsApp === 'function') {
+    try {
+      const results = await sock.onWhatsApp(intl);
+      if (Array.isArray(results) && results.length > 0 && results[0].exists && results[0].jid) {
+        return results[0].jid;
+      }
+    } catch (e) {
+      // Fallback to standard JID
+    }
+  }
+  return standardJid;
+}
+
 async function connectToWhatsApp() {
   if (isReconnecting) return;
   isReconnecting = true;
@@ -555,7 +700,7 @@ async function connectToWhatsApp() {
       markOnlineOnConnect: false
     });
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', update => {
       const { connection, lastDisconnect, qr } = update;
       if (qr) {
         console.log('⚡ Scan this QR Code with WhatsApp:');
@@ -567,11 +712,15 @@ async function connectToWhatsApp() {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         lastDisconnectCode = statusCode || null;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.warn(`⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`);
+        console.warn(
+          `⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`
+        );
         if (shouldReconnect) {
           setTimeout(() => connectToWhatsApp(), 3000);
         } else {
-          console.error('❌ WhatsApp session logged out. Clear auth folder and scan QR again.');
+          console.error(
+            '❌ WhatsApp session logged out. Clear auth folder and scan QR again.'
+          );
         }
       } else if (connection === 'open') {
         isReconnecting = false;
@@ -589,43 +738,76 @@ async function connectToWhatsApp() {
         if (!msg.message || msg.key.fromMe) continue;
 
         const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') continue;
+        if (
+          !remoteJid ||
+          remoteJid.endsWith('@g.us') ||
+          remoteJid === 'status@broadcast'
+        ) {
+          continue;
+        }
 
         const text = extractIncomingText(msg);
         if (!text) continue;
         const lowerText = text.toLowerCase();
 
+        // 1. Feedback command via WhatsApp: !maoni [orderId] [1-5] [comment]
         if (lowerText.startsWith('!maoni')) {
           const parts = text.split(/\s+/);
           const orderId = parseInt(parts[1], 10);
           const rating = parseInt(parts[2], 10);
-          const comment = parts.slice(3).join(' ');
+          const comment = parts.slice(3).join(' ').trim();
+
           if (!orderId || isNaN(rating) || rating < 1 || rating > 5 || !comment) {
-            await sock.sendMessage(remoteJid, { text: '❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*' });
+            await sock.sendMessage(remoteJid, {
+              text:
+                '❌ Muundo sio sahihi.\n\nTumia muundo huu:\n*!maoni [NambaYaOda] [Nyota 1-5] [Maoni yako]*\n\nMfano:\n*!maoni 12 5 Bidhaa ni nzuri sana*'
+            });
             continue;
           }
+
           const orderExists = await db('orders').where({ orderId }).first();
           if (!orderExists) {
-            await sock.sendMessage(remoteJid, { text: `❌ Haikuwezekana kupata Oda #${orderId}.` });
+            await sock.sendMessage(remoteJid, {
+              text: `❌ Haikuwezekana kupata Oda #${orderId}.`
+            });
             continue;
           }
+
           const existingReview = await db('reviews').where({ orderId }).first();
           if (existingReview) {
-            await db('reviews').where({ orderId }).update({ rating, comment: comment.trim(), date: new Date() });
+            await db('reviews')
+              .where({ orderId })
+              .update({ rating, comment, date: new Date() });
           } else {
-            await db('reviews').insert({ orderId, rating, comment: comment.trim(), date: new Date() });
+            await db('reviews').insert({
+              orderId,
+              rating,
+              comment,
+              date: new Date()
+            });
           }
-          await sock.sendMessage(remoteJid, { text: `🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.` });
+
+          await sock.sendMessage(remoteJid, {
+            text: `🎉 *AHSANTE SANA KWA FEEDBACK YAKO!* ⭐\n\nTumepokea tathmini yako ya nyota ${'⭐'.repeat(rating)} kwa Oda #${orderId}.`
+          });
           continue;
         }
 
+        // 2. Order command via WhatsApp: !agiza / !order
         if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
+          const senderDigits = remoteJid
+            .replace('@s.whatsapp.net', '')
+            .replace('@c.us', '')
+            .replace('@lid', '');
           let location = 'Haikutajwa';
-          let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace('@lid', '');
+          let phone = normalizePhone(senderDigits) || senderDigits;
           let notes = '';
           let orderItems = [];
 
-          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          const lines = text
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(Boolean);
           const firstLine = lines[0] || '';
           const afterCommand = firstLine.replace(/^!(agiza|order)\s*/i, '').trim();
 
@@ -658,7 +840,9 @@ async function connectToWhatsApp() {
               const segs = itemBody.split('|').map(s => s.trim());
               const idMatch = segs[0].match(/#?(\d+)/);
               if (idMatch) {
-                let itSize = defaultSize, itColor = defaultColor, itQty = defaultQty;
+                let itSize = defaultSize;
+                let itColor = defaultColor;
+                let itQty = defaultQty;
                 segs.slice(1).forEach(s => {
                   if (/^(size|saizi):/i.test(s)) {
                     itSize = s.replace(/^(size|saizi):\s*/i, '').trim() || 'Standard';
@@ -671,7 +855,12 @@ async function connectToWhatsApp() {
                     if (!isNaN(q) && q > 0) itQty = q;
                   }
                 });
-                orderItems.push({ id: parseInt(idMatch[1], 10), size: itSize, color: itColor, qty: itQty });
+                orderItems.push({
+                  id: parseInt(idMatch[1], 10),
+                  size: itSize,
+                  color: itColor,
+                  qty: itQty
+                });
               }
             }
           }
@@ -718,7 +907,9 @@ async function connectToWhatsApp() {
           }
 
           if (orderItems.length === 0) {
-            await sock.sendMessage(remoteJid, { text: `❌ Tafadhali taja namba ya bidhaa (mfano: *!agiza 5*) au chagua bidhaa hapa:\n${PUBLIC_URL}/catalog` });
+            await sock.sendMessage(remoteJid, {
+              text: `❌ Tafadhali taja namba ya bidhaa (mfano: *!agiza 1*) au chagua bidhaa hapa:\n${PUBLIC_URL}/catalog`
+            });
             continue;
           }
 
@@ -746,7 +937,10 @@ async function connectToWhatsApp() {
             if (extras.length > 0) detailsSummary += ` (${extras.join(', ')})`;
 
             const maxRows = await db('orders').max('orderId as maxId');
-            const rawMax = maxRows && maxRows[0] ? (maxRows[0].maxId ?? Object.values(maxRows[0])[0]) : 0;
+            const rawMax =
+              maxRows && maxRows[0]
+                ? maxRows[0].maxId ?? Object.values(maxRows[0])[0]
+                : 0;
             const nextOrderId = (rawMax ? Number(rawMax) : 0) + 1;
 
             const newOrder = {
@@ -768,29 +962,38 @@ async function connectToWhatsApp() {
 
             await notifyWinga(newOrder, product);
 
-            const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
-            if (orderWinga && isSmsEnabled(orderWinga.sms_enabled) && orderWinga.phone) {
-              sendSellerOrderSms({
-                phone: orderWinga.phone,
-                sellerName: orderWinga.name,
-                orderId: newOrder.orderId,
-                totalAmount: newOrder.sellingPrice,
-              }).catch((err) => console.error('[SMS Hook] Imeshindwa kutuma SMS:', err));
+            if (typeof sendSellerOrderSms === 'function') {
+              const orderWinga = await db('wingas')
+                .where({ id: newOrder.wingaId })
+                .first();
+              if (orderWinga && isSmsEnabled(orderWinga.sms_enabled) && orderWinga.phone) {
+                sendSellerOrderSms({
+                  phone: orderWinga.phone,
+                  sellerName: orderWinga.name,
+                  orderId: newOrder.orderId,
+                  totalAmount: newOrder.sellingPrice
+                }).catch(err => console.error('[SMS Hook] Imeshindwa kutuma SMS:', err));
+              }
             }
           }
 
           if (createdReceipts.length === 0) {
             await sock.sendMessage(remoteJid, {
-              text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya kuchagua bidhaa zilizopo:\n${PUBLIC_URL}/catalog`
+              text: `❌ Samahani, bidhaa #${missingIds.join(', #')} haikupatikana kwenye mfumo. Tafadhali fungua Catalog upya:\n${PUBLIC_URL}/catalog`
             });
             continue;
           }
 
           let grandTotal = 0;
-          const linesOut = createdReceipts.map(({ order }) => {
-            grandTotal += Number(order.sellingPrice || 0);
-            return `🔖 *Oda #${order.orderId}:* ${order.productName} — TSh ${Number(order.sellingPrice).toLocaleString()}\n   🔗 Fuatilia (Weka namba yako kuhakiki): ${PUBLIC_URL}/track?id=${order.orderId}`;
-          }).join('\n\n');
+          const linesOut = createdReceipts
+            .map(({ order }) => {
+              grandTotal += Number(order.sellingPrice || 0);
+              return (
+                `🔖 *Oda #${order.orderId}:* ${order.productName} — TSh ${Number(order.sellingPrice).toLocaleString()}\n` +
+                `   🔗 Fuatilia (Weka namba yako kuhakiki): ${PUBLIC_URL}/track?id=${order.orderId}`
+              );
+            })
+            .join('\n\n');
 
           let replyMsg =
             `🛒 *ODA YAKO IMEPOKELEWA!*\n---------------------------\n` +
@@ -808,9 +1011,29 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        const greetingKeywords = ['hi', 'hello', 'vp', 'habari', 'mambo', 'catalog', 'katalogi', 'katalog', '1', 'nguo', 'hey', 'niaje'];
-        if (greetingKeywords.some(keyword => lowerText === keyword || lowerText.startsWith(keyword + ' '))) {
-          await sock.sendMessage(remoteJid, { text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${PUBLIC_URL}/catalog` });
+        // 3. Greeting / Catalog shortcut
+        const greetingKeywords = [
+          'hi',
+          'hello',
+          'vp',
+          'habari',
+          'mambo',
+          'catalog',
+          'katalogi',
+          'katalog',
+          '1',
+          'nguo',
+          'hey',
+          'niaje'
+        ];
+        if (
+          greetingKeywords.some(
+            keyword => lowerText === keyword || lowerText.startsWith(keyword + ' ')
+          )
+        ) {
+          await sock.sendMessage(remoteJid, {
+            text: `Karibu WingaShop! 👋\n\nTazama na utafute bidhaa zetu hapa:\n${PUBLIC_URL}/catalog`
+          });
           continue;
         }
       }
@@ -835,7 +1058,13 @@ async function notifyShopCustomers(winga) {
     }
 
     const shopOrders = await db('orders').where({ wingaId: winga.id });
-    const customerJids = [...new Set(shopOrders.map(o => o.senderJid).filter(j => j && j.endsWith('@s.whatsapp.net')))];
+    const customerJids = [
+      ...new Set(
+        shopOrders
+          .map(o => o.senderJid)
+          .filter(j => j && String(j).includes('@'))
+      )
+    ];
     if (customerJids.length === 0) return;
 
     shopBroadcastCooldown.set(winga.id, now);
@@ -861,9 +1090,8 @@ async function notifyWinga(order, product) {
     if (!isBotSocketReady()) return;
     const winga = await db('wingas').where({ id: order.wingaId }).first();
     if (!winga || !winga.phone) return;
-    let phone = winga.phone.trim().replace(/\D/g, '');
-    if (phone.startsWith('0')) phone = '255' + phone.slice(1);
-    const wingaChatId = phone + '@s.whatsapp.net';
+    const wingaChatId = await resolveWhatsAppRecipientJid(winga.phone);
+    if (!wingaChatId) return;
 
     const alertMessage =
       `🔔 *ODA MPYA IMETOKA KWENYE DUKA YAKO!* 🛍️\n` +
@@ -871,7 +1099,7 @@ async function notifyWinga(order, product) {
       `🔖 *Namba ya Oda:* #${order.orderId}\n` +
       `📦 *Bidhaa:* ${order.productName}\n` +
       `💰 *Bei ya Kuuzia:* TSh ${Number(order.sellingPrice).toLocaleString()}\n` +
-      `💵 *Faida Yako (Profit):* TSh ${(order.sellingPrice - order.buyingPrice).toLocaleString()}\n` +
+      `💵 *Faida Yako (Profit):* TSh ${(Number(order.sellingPrice) - Number(order.buyingPrice)).toLocaleString()}\n` +
       `📍 *Eneo la Mteja:* ${order.location}\n` +
       `📞 *Mteja Simu:* ${order.customerPhone}\n\n` +
       `📲 Angalia dashboard yako hapa: ${PUBLIC_URL}/admin`;
@@ -879,7 +1107,10 @@ async function notifyWinga(order, product) {
     const images = getProductImages(product);
     if (images.length > 0 && isHttpUrl(images[0])) {
       try {
-        await sock.sendMessage(wingaChatId, { image: { url: images[0] }, caption: alertMessage });
+        await sock.sendMessage(wingaChatId, {
+          image: { url: images[0] },
+          caption: alertMessage
+        });
       } catch (imgErr) {
         console.warn('⚠️ Image alert failed, sending text fallback:', imgErr.message);
         await sock.sendMessage(wingaChatId, { text: alertMessage });
@@ -892,7 +1123,7 @@ async function notifyWinga(order, product) {
   }
 }
 
-// Bot status debug endpoint (helps verify live socket status)
+// Bot status check route
 app.get('/bot-status', (req, res) => {
   res.json({
     ready: isBotSocketReady(),
@@ -904,13 +1135,15 @@ app.get('/bot-status', (req, res) => {
   });
 });
 
-// Public Catalog Route with Details Modal, Customer Reviews, Multi-Color Selection & Cart
+// ==========================================
+// PUBLIC CATALOG (Product-Specific Reviews Only)
+// ==========================================
 app.get('/catalog', async (req, res) => {
   try {
     try {
       await db('stats').where({ key: 'catalogVisits' }).increment('value', 1);
     } catch (statErr) {
-      console.warn('Stats increment skipped:', statErr.message);
+      // Optional stats table
     }
 
     const allProducts = await db('products').select('*');
@@ -920,113 +1153,137 @@ app.get('/catalog', async (req, res) => {
 
     const shopId = req.query.shop ? parseInt(req.query.shop, 10) : null;
     let products = allProducts;
-    let shopName = "Soko Letu (All Shops)";
+    let shopName = 'Soko Letu (All Shops)';
     if (shopId) {
       products = allProducts.filter(p => Number(p.wingaId) === shopId);
       const matchedWinga = wingas.find(w => Number(w.id) === shopId);
       if (matchedWinga) {
         shopName = `🛍️ Duka la ${matchedWinga.name}`;
       } else {
-        shopName = "⚠️ Duka halipatikani";
+        shopName = '⚠️ Duka halipatikani';
         products = [];
       }
     }
 
     const trackBtnUrl = shopId ? `/track?shop=${shopId}` : '/track';
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
-    const categories = [...new Set(allProducts.map(p => (p.category || 'General').trim()).filter(Boolean))];
+    const categories = [
+      ...new Set(allProducts.map(p => (p.category || 'General').trim()).filter(Boolean))
+    ];
 
-    const categoryOptions = categories.map(cat => `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`).join('');
-    const shopOptions = wingas.map(w => `<option value="${w.id}" ${shopId === Number(w.id) ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`).join('');
+    const categoryOptions = categories
+      .map(
+        cat =>
+          `<option value="${escapeHtml(cat.toLowerCase())}">${escapeHtml(cat)}</option>`
+      )
+      .join('');
+    const shopOptions = wingas
+      .map(
+        w =>
+          `<option value="${w.id}" ${shopId === Number(w.id) ? 'selected' : ''}>${escapeHtml(w.name)} (${escapeHtml(w.location || 'Tanzania')})</option>`
+      )
+      .join('');
 
     const catalogProductsMap = {};
 
-    let productCards = products.map(p => {
-      const sellingPrice = Number(p.sellingPrice || p.price || 0);
-      const priceFormatted = sellingPrice > 0 ? sellingPrice.toLocaleString() : 'Haikutajwa';
-      const priceDisplay = sellingPrice > 0 ? `TSh ${priceFormatted}` : 'Wasiliana na Muuzaji';
+    let productCards = products
+      .map(p => {
+        const sellingPrice = Number(p.sellingPrice || p.price || 0);
+        const priceFormatted = sellingPrice > 0 ? sellingPrice.toLocaleString() : 'Haikutajwa';
+        const priceDisplay =
+          sellingPrice > 0 ? `TSh ${priceFormatted}` : 'Wasiliana na Muuzaji';
 
-      const imageList = getProductImages(p);
-      const mainImage = imageList[0] || '';
-      const categoryStr = (p.category || 'General').trim();
-      const availableSizes = (p.size || 'Standard').trim();
-      const availableColors = (p.colors || 'Kama pichani').trim();
-      const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
-      const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
-      const sellerLocation = matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
+        const imageList = getProductImages(p);
+        const mainImage = imageList[0] || '';
+        const categoryStr = (p.category || 'General').trim();
+        const availableSizes = (p.size || 'Standard').trim();
+        const availableColors = (p.colors || 'Kama pichani').trim();
+        const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
+        const sellerName = matchedWinga ? matchedWinga.name : 'Duka Kuu';
+        const sellerLocation =
+          matchedWinga && matchedWinga.location ? matchedWinga.location : 'Tanzania';
 
-      const shopOrderIds = allOrders.filter(o => Number(o.wingaId) === Number(p.wingaId)).map(o => o.orderId);
-      const productOrderIds = allOrders.filter(o => Number(o.productId) === Number(p.id)).map(o => o.orderId);
-      const prodReviews = allReviews.filter(r => productOrderIds.includes(r.orderId));
-      const shopReviews = allReviews.filter(r => shopOrderIds.includes(r.orderId));
-      const activeReviews = prodReviews.length > 0 ? prodReviews : shopReviews;
-      const avgRating = activeReviews.length > 0
-        ? (activeReviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) / activeReviews.length).toFixed(1)
-        : null;
+        // STRICT: Only reviews for THIS specific product
+        const productOnlyReviews = getReviewsForProduct(p, allOrders, allReviews);
+        const avgRating =
+          productOnlyReviews.length > 0
+            ? (
+                productOnlyReviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) /
+                productOnlyReviews.length
+              ).toFixed(1)
+            : null;
 
-      catalogProductsMap[p.id] = {
-        id: p.id,
-        name: p.name,
-        priceNum: sellingPrice,
-        priceFormatted,
-        category: categoryStr,
-        sizes: availableSizes,
-        colors: availableColors,
-        images: imageList,
-        sellerName,
-        sellerLocation,
-        avgRating,
-        reviews: activeReviews.slice(0, 15).map(r => ({
-          rating: r.rating,
-          comment: r.comment,
-          date: r.date ? new Date(r.date).toLocaleDateString('sw-TZ') : ''
-        }))
-      };
+        catalogProductsMap[p.id] = {
+          id: p.id,
+          name: p.name,
+          priceNum: sellingPrice,
+          priceFormatted,
+          category: categoryStr,
+          sizes: availableSizes,
+          colors: availableColors,
+          images: imageList,
+          sellerName,
+          sellerLocation,
+          avgRating,
+          reviews: productOnlyReviews.slice(0, 15).map(r => ({
+            rating: r.rating,
+            comment: r.comment,
+            date: r.date ? new Date(r.date).toLocaleDateString('sw-TZ') : ''
+          }))
+        };
 
-      let galleryThumbnailsHtml = '';
-      if (imageList.length > 1) {
-        galleryThumbnailsHtml = `<div style="display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 4px;">` +
-          imageList.map(img => `<img src="${escapeHtml(img)}" data-thumb="${escapeHtml(img)}" data-target="img-${p.id}" onclick="event.stopPropagation(); selectThumb(this)" style="width: 42px; height: 42px; object-fit: cover; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`).join('') +
-          `</div>`;
-      }
+        let galleryThumbnailsHtml = '';
+        if (imageList.length > 1) {
+          galleryThumbnailsHtml =
+            `<div style="display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 4px;">` +
+            imageList
+              .map(
+                img =>
+                  `<img src="${escapeHtml(img)}" data-thumb="${escapeHtml(img)}" data-target="img-${p.id}" onclick="event.stopPropagation(); selectThumb(this)" style="width: 42px; height: 42px; object-fit: cover; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
+              )
+              .join('') +
+            `</div>`;
+        }
 
-      const imageHtml = mainImage
-        ? `<div onclick="openProductDetailsById(${p.id})" style="position: relative; cursor: pointer;">
-            <img id="img-${p.id}" data-fullsrc="${escapeHtml(mainImage)}" src="${escapeHtml(mainImage)}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
-            <button type="button" onclick="event.stopPropagation(); zoomCardImage('img-${p.id}')" class="lbl-zoom" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.65); color: white; border:none; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🔍 Kuza</button>
-            <span class="lbl-details-badge" style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.72); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">👁️ Maelezo & Maoni</span>
-           </div>${galleryThumbnailsHtml}`
-        : `<div onclick="openProductDetailsById(${p.id})" style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd; cursor: pointer;">📦</div>`;
+        const imageHtml = mainImage
+          ? `<div onclick="openProductDetailsById(${p.id})" style="position: relative; cursor: pointer;">
+              <img id="img-${p.id}" data-fullsrc="${escapeHtml(mainImage)}" src="${escapeHtml(mainImage)}" alt="${escapeHtml(p.name)}" style="width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;">
+              <button type="button" onclick="event.stopPropagation(); zoomCardImage('img-${p.id}')" class="lbl-zoom" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.65); color: white; border:none; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🔍 Kuza</button>
+              <span class="lbl-details-badge" style="position: absolute; bottom: 14px; right: 8px; background: rgba(0,0,0,0.72); color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; pointer-events: none;">👁️ Maelezo & Maoni</span>
+             </div>${galleryThumbnailsHtml}`
+          : `<div onclick="openProductDetailsById(${p.id})" style="height: 140px; background: #e9ecef; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 10px; color: #adb5bd; cursor: pointer;">📦</div>`;
 
-      const ratingBadge = avgRating
-        ? `<span style="background:#fff3cd; color:#856404; font-size:11px; padding:2px 6px; border-radius:8px; font-weight:bold;">⭐ ${avgRating} (${activeReviews.length} maoni)</span>`
-        : `<span style="background:#e8f5e9; color:#2e7d32; font-size:10px; padding:2px 6px; border-radius:8px; font-weight:bold;">✓ Duka Lililosajiliwa</span>`;
+        const ratingBadge = avgRating
+          ? `<span style="background:#fff3cd; color:#856404; font-size:11px; padding:2px 6px; border-radius:8px; font-weight:bold;">⭐ ${avgRating} (${productOnlyReviews.length} maoni)</span>`
+          : `<span style="background:#f1f3f5; color:#6c757d; font-size:10px; padding:2px 6px; border-radius:8px; font-weight:bold;">Hakuna maoni bado</span>`;
 
-      return `
-      <div class="product-card" data-name="${escapeHtml((p.name || '').toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
-          ${imageHtml}
-          <div style="margin-bottom: 5px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
-            <span style="background: #e3f2fd; color: #0d47a1; font-size: 10px; padding: 3px 7px; border-radius: 12px; font-weight: bold;">${escapeHtml(categoryStr)}</span>
-            ${ratingBadge}
+        return `
+        <div class="product-card" data-name="${escapeHtml((p.name || '').toLowerCase())}" data-category="${escapeHtml(categoryStr.toLowerCase())}" data-shop="${p.wingaId}" data-shopname="${escapeHtml(sellerName.toLowerCase())}" style="background: white; padding: 12px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: left; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            ${imageHtml}
+            <div style="margin-bottom: 5px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+              <span style="background: #e3f2fd; color: #0d47a1; font-size: 10px; padding: 3px 7px; border-radius: 12px; font-weight: bold;">${escapeHtml(categoryStr)}</span>
+              ${ratingBadge}
+            </div>
+            <h3 onclick="openProductDetailsById(${p.id})" style="margin: 5px 0; color: #222; font-size: 15px; word-break: break-word; cursor:pointer; text-decoration:underline;">${escapeHtml(p.name)}</h3>
+            <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 15px; font-weight: bold; margin: 5px 0 8px 0;">${priceDisplay}</p>
           </div>
-          <h3 onclick="openProductDetailsById(${p.id})" style="margin: 5px 0; color: #222; font-size: 15px; word-break: break-word; cursor:pointer; text-decoration:underline;">${escapeHtml(p.name)}</h3>
-          <p style="color: ${sellingPrice > 0 ? '#28a745' : '#6c757d'}; font-size: 15px; font-weight: bold; margin: 5px 0 8px 0;">${priceDisplay}</p>
-        </div>
-        <div style="font-size: 12px; color: #555; margin-bottom: 8px;">
-          <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
-          <span>📍 <em>${escapeHtml(sellerLocation)}</em></span><br>
-          <span>🎨 <em>${escapeHtml(availableColors)}</em></span>
-        </div>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="details-btn-text" onclick="openProductDetailsById(${p.id})" style="background:#007bff; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">ℹ️ Maelezo</button>
-          <button type="button" class="order-btn-text" onclick="openOrderModalById(${p.id})" style="background:#25D366; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">🛒 Agiza</button>
-        </div>
-      </div>`;
-    }).join('');
+          <div style="font-size: 12px; color: #555; margin-bottom: 8px;">
+            <span>🏪 <strong>${escapeHtml(sellerName)}</strong></span><br>
+            <span>📍 <em>${escapeHtml(sellerLocation)}</em></span><br>
+            <span>🎨 <em>${escapeHtml(availableColors)}</em></span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="details-btn-text" onclick="openProductDetailsById(${p.id})" style="background:#007bff; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">ℹ️ Maelezo</button>
+            <button type="button" class="order-btn-text" onclick="openOrderModalById(${p.id})" style="background:#25D366; color:white; padding:9px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; flex:1;">🛒 Agiza</button>
+          </div>
+        </div>`;
+      })
+      .join('');
 
     if (products.length === 0) {
-      productCards = '<p class="no-prod-text" style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
+      productCards =
+        '<p class="no-prod-text" style="grid-column: 1 / -1; text-align: center; color: #666; padding: 40px 0;">Hakuna bidhaa kwenye duka hili kwa sasa.</p>';
     }
 
     const safeCatalogJson = JSON.stringify(catalogProductsMap).replace(/</g, '\\u003c');
@@ -1102,7 +1359,7 @@ app.get('/catalog', async (req, res) => {
           <button type="button" class="close-btn" onclick="closeHelpModal()">&times;</button>
           <h3 style="margin-top:0; color:#111; font-size:18px;" id="helpModalTitle">❓ Msaada & Maswali (FAQs)</h3>
           <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
-            <p><strong>1. Jinsi ya kuagiza bidhaa?</strong><br>Bonyeza "Maelezo" kuona ubora na maoni ya wateja, au bonyeza "Agiza" kuchagua saizi, idadi, rangi ya kila bidhaa, kisha tuma oda moja kwa moja WhatsApp au weka kwenye Kikapu kwa oda nyingi.</p>
+            <p><strong>1. Jinsi ya kuagiza bidhaa?</strong><br>Bonyeza "Maelezo" kuona taarifa na maoni ya bidhaa husika, au bonyeza "Agiza" kuchagua saizi, idadi, na rangi kisha tuma oda moja kwa moja WhatsApp au weka kwenye Kikapu.</p>
             <p><strong>2. Jinsi ya kufuatilia oda yako?</strong><br>Bofya "Fuatilia Oda", weka namba yako ya oda na namba ya simu uliyotumia kuagiza ili kuona hatua ya oda na kutoa maoni/nyota.</p>
             <p><strong>3. Jinsi ya kuwa muuzaji (Winga)?</strong><br>Unaweza kujisajili kupitia ukurasa wa Login/Register au kuwasiliana na Admin wa mfumo.</p>
           </div>
@@ -1127,7 +1384,7 @@ app.get('/catalog', async (req, res) => {
         <img id="lightboxImage" style="max-width: 95%; max-height: 85vh; border-radius: 8px; object-fit: contain;">
       </div>
 
-      <!-- Details Modal -->
+      <!-- Product Details Modal -->
       <div id="detailsModal" class="modal-overlay">
         <div class="modal-content">
           <button type="button" class="close-btn" onclick="closeModalById('detailsModal')">&times;</button>
@@ -1328,10 +1585,10 @@ app.get('/catalog', async (req, res) => {
             : '<div style="height:120px; background:#eee; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:40px;">📦</div>';
 
           var trustBadge = p.avgRating
-            ? '<span style="background:#fff3cd; color:#856404; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">⭐ Wastani wa Nyota: ' + escJsHtml(p.avgRating) + ' / 5 (' + p.reviews.length + ' maoni)</span>'
-            : '<span style="background:#e8f5e9; color:#2e7d32; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">✓ Muuzaji Amesajiliwa Kwenye Mfumo</span>';
+            ? '<span style="background:#fff3cd; color:#856404; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">⭐ Wastani wa Nyota kwa Bidhaa Hii: ' + escJsHtml(p.avgRating) + ' / 5 (' + p.reviews.length + ' maoni)</span>'
+            : '<span style="background:#f1f3f5; color:#555; padding:4px 8px; border-radius:6px; font-size:12px; font-weight:bold;">Hakuna maoni ya bidhaa hii bado</span>';
 
-          var reviewsHtml = '<p style="color:#777; font-size:13px;">Bado hakuna maoni ya wateja kwa bidhaa/duka hili.</p>';
+          var reviewsHtml = '<p style="color:#777; font-size:13px;">Bado hakuna maoni yaliyowekwa mahsusi kwa bidhaa hii.</p>';
           if (p.reviews && p.reviews.length > 0) {
             reviewsHtml = p.reviews.map(function(r) {
               var stars = '⭐'.repeat(Math.max(1, Math.min(5, Number(r.rating) || 5)));
@@ -1353,7 +1610,7 @@ app.get('/catalog', async (req, res) => {
             '<strong>📏 Saizi Zilizopo:</strong> ' + escJsHtml(p.sizes || 'Standard') + '<br>' +
             '<strong>🎨 Rangi Zilizopo:</strong> ' + escJsHtml(p.colors || 'Kama pichani') +
             '</div>' +
-            '<h4 style="margin:10px 0 6px 0; font-size:14px;">⭐ Maoni ya Wateja (' + (p.reviews ? p.reviews.length : 0) + ')</h4>' +
+            '<h4 style="margin:10px 0 6px 0; font-size:14px;">⭐ Maoni ya Bidhaa Hii (' + (p.reviews ? p.reviews.length : 0) + ')</h4>' +
             '<div style="max-height:160px; overflow-y:auto; margin-bottom:12px; border:1px solid #eee; padding:0 10px; border-radius:6px;">' + reviewsHtml + '</div>' +
             '<button type="button" id="detailsOrderNowBtn" class="submit-btn">🛒 Endelea Kuagiza Bidhaa Hii</button>';
 
@@ -1591,7 +1848,9 @@ app.get('/catalog', async (req, res) => {
   }
 });
 
-// Secure Track Route with Phone Verification, Public Reviews & Fraud Reporting
+// ==========================================
+// TRACK ORDER, VERIFY, REVIEW & INVOICE
+// ==========================================
 app.get('/track', async (req, res) => {
   try {
     const searchId = req.query.id ? parseInt(req.query.id, 10) : null;
@@ -1653,15 +1912,23 @@ app.get('/track', async (req, res) => {
 
           let publicReviewsHtml = '';
           if (allOrderReviews.length > 0) {
-            publicReviewsHtml = `<div style="margin-top: 15px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px;">
-              <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📢 Maoni ya Umma (Public Reviews):</h4>` +
-              allOrderReviews.map(r => `<div style="font-size: 13px; border-bottom: 1px solid #f1f3f5; padding-bottom: 6px; margin-bottom: 6px;">
-                <span>${'⭐'.repeat(Math.max(1, Math.min(5, Number(r.rating) || 5)))}</span> <span style="color: #666; font-size: 11px;">(${new Date(r.date).toLocaleDateString()})</span><br>
+            publicReviewsHtml =
+              `<div style="margin-top: 15px; padding: 12px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px;">
+              <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">📢 Maoni ya Oda Hii:</h4>` +
+              allOrderReviews
+                .map(
+                  r => `<div style="font-size: 13px; border-bottom: 1px solid #f1f3f5; padding-bottom: 6px; margin-bottom: 6px;">
+                <span>${'⭐'.repeat(Math.max(1, Math.min(5, Number(r.rating) || 5)))}</span> <span style="color: #666; font-size: 11px;">(${r.date ? new Date(r.date).toLocaleDateString() : ''})</span><br>
                 <em>"${escapeHtml(r.comment)}"</em>
-              </div>`).join('') + `</div>`;
+              </div>`
+                )
+                .join('') +
+              `</div>`;
           }
 
-          const reportFraudMsg = encodeURIComponent(`🚨 RIPOTI YA DHULUMA / TATIZO:\nNaomba kuripoti oda #${order.orderId} (${order.productName}) yenye thamani ya TSh ${Number(order.sellingPrice).toLocaleString()}. Tatizo ni: `);
+          const reportFraudMsg = encodeURIComponent(
+            `🚨 RIPOTI YA DHULUMA / TATIZO:\nNaomba kuripoti oda #${order.orderId} (${order.productName}) yenye thamani ya TSh ${Number(order.sellingPrice).toLocaleString()}. Tatizo ni: `
+          );
           resultHtml = `
           <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-top:20px;">
             <h3>Oda #${order.orderId} ✅</h3>
@@ -1717,30 +1984,27 @@ app.get('/track', async (req, res) => {
     </html>
     `);
   } catch (err) {
+    console.error('Track error:', err);
     res.status(500).send('Hitilafu imetokea.');
   }
 });
 
-app.post('/track/verify', rateLimitAuth(6, 15 * 60 * 1000), async (req, res) => {
+app.post('/track/verify', rateLimitAuth(10, 15 * 60 * 1000), async (req, res) => {
   try {
     const oid = parseInt(req.body.orderId, 10);
-    const inputPhone = (req.body.phone || '').trim().replace(/\D/g, '');
+    const inputPhone = (req.body.phone || '').trim();
     const shop = req.body.shop;
     const order = await db('orders').where({ orderId: oid }).first();
     if (!order) return res.redirect('/track');
 
-    const dbPhone = (order.customerPhone || '').trim().replace(/\D/g, '');
-    const isMatch = dbPhone === inputPhone ||
-                    dbPhone.endsWith(inputPhone) ||
-                    inputPhone.endsWith(dbPhone) ||
-                    (dbPhone.startsWith('255') && dbPhone.slice(3) === inputPhone) ||
-                    (inputPhone.startsWith('255') && inputPhone.slice(3) === dbPhone);
-    if (isMatch) {
+    if (isSamePhone(order.customerPhone, inputPhone)) {
       if (!req.session.verifiedOrders) req.session.verifiedOrders = {};
       req.session.verifiedOrders[oid] = true;
       return res.redirect(`/track?id=${oid}${shop ? '&shop=' + shop : ''}`);
     }
-    res.send(`<div style="text-align:center; padding:40px; font-family:sans-serif;"><h3 style="color:#dc3545;">❌ Namba ya Simu Si Sahihi!</h3><a href="/track?id=${oid}${shop ? '&shop=' + shop : ''}">Jaribu Tena</a></div>`);
+    res.send(
+      `<div style="text-align:center; padding:40px; font-family:sans-serif;"><h3 style="color:#dc3545;">❌ Namba ya Simu Si Sahihi!</h3><a href="/track?id=${oid}${shop ? '&shop=' + shop : ''}">Jaribu Tena</a></div>`
+    );
   } catch (err) {
     res.redirect('/track');
   }
@@ -1756,7 +2020,9 @@ app.get('/track/invoice', async (req, res) => {
     if (!order) return res.send('❌ Oda haipatikani.');
     const winga = await db('wingas').where({ id: order.wingaId }).first();
     const shopLink = `${PUBLIC_URL}/catalog?shop=${winga ? winga.id : 1}`;
-    res.send(`<!DOCTYPE html><html lang="sw"><head><meta charset="UTF-8"><title>Risiti #${order.orderId}</title><style>body{font-family:monospace;padding:20px;max-width:420px;margin:20px auto;border:1px solid #ddd;border-radius:8px;}.center{text-align:center;}hr{border:dashed 1px #888;}.btn-print{background:#007bff;color:white;border:none;padding:12px;width:100%;cursor:pointer;font-weight:bold;margin-top:20px;border-radius:6px;}@media print{.btn-print{display:none;}}</style></head><body><div class="center"><h2>🛍️ ${escapeHtml(winga ? winga.name : 'Winga Shop')}</h2><p>Simu: ${escapeHtml(winga ? winga.phone : '-')}</p><p style="font-size:12px;"><a href="${shopLink}">${shopLink}</a></p><hr><h3>RISITI YA MAUZO</h3></div><p><strong>Oda:</strong> #${order.orderId}</p><p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p><p><strong>Simu:</strong> ${escapeHtml(order.customerPhone)}</p><p><strong>Eneo:</strong> ${escapeHtml(order.location)}</p><hr><p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p><p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p><hr><p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p><button class="btn-print" onclick="window.print()">🖨️ Chapisha / PDF</button></body></html>`);
+    res.send(
+      `<!DOCTYPE html><html lang="sw"><head><meta charset="UTF-8"><title>Risiti #${order.orderId}</title><style>body{font-family:monospace;padding:20px;max-width:420px;margin:20px auto;border:1px solid #ddd;border-radius:8px;}.center{text-align:center;}hr{border:dashed 1px #888;}.btn-print{background:#007bff;color:white;border:none;padding:12px;width:100%;cursor:pointer;font-weight:bold;margin-top:20px;border-radius:6px;}@media print{.btn-print{display:none;}}</style></head><body><div class="center"><h2>🛍️ ${escapeHtml(winga ? winga.name : 'Winga Shop')}</h2><p>Simu: ${escapeHtml(winga ? winga.phone : '-')}</p><p style="font-size:12px;"><a href="${shopLink}">${shopLink}</a></p><hr><h3>RISITI YA MAUZO</h3></div><p><strong>Oda:</strong> #${order.orderId}</p><p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p><p><strong>Simu:</strong> ${escapeHtml(order.customerPhone)}</p><p><strong>Eneo:</strong> ${escapeHtml(order.location)}</p><hr><p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p><p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p><hr><p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p><button class="btn-print" onclick="window.print()">🖨️ Chapisha / PDF</button></body></html>`
+    );
   } catch (err) {
     res.status(500).send('Hitilafu kwenye risiti.');
   }
@@ -1765,20 +2031,38 @@ app.get('/track/invoice', async (req, res) => {
 app.post('/track/review', async (req, res) => {
   try {
     const oid = parseInt(req.body.orderId, 10);
-    if (!(req.session.verifiedOrders || {})[oid]) return res.redirect(`/track?id=${oid}`);
+    if (!(req.session.verifiedOrders || {})[oid]) {
+      return res.redirect(`/track?id=${oid}`);
+    }
+    const rating = Math.max(1, Math.min(5, parseInt(req.body.rating, 10) || 5));
+    const comment = (req.body.comment || '').trim();
+    if (!comment) return res.redirect(`/track?id=${oid}`);
+
     const existing = await db('reviews').where({ orderId: oid }).first();
     if (existing) {
-      await db('reviews').where({ orderId: oid }).update({ rating: parseInt(req.body.rating, 10), comment: req.body.comment.trim(), date: new Date() });
+      await db('reviews').where({ orderId: oid }).update({
+        rating,
+        comment,
+        date: new Date()
+      });
     } else {
-      await db('reviews').insert({ orderId: oid, rating: parseInt(req.body.rating, 10), comment: req.body.comment.trim(), date: new Date() });
+      await db('reviews').insert({
+        orderId: oid,
+        rating,
+        comment,
+        date: new Date()
+      });
     }
     res.redirect(`/track?id=${oid}`);
   } catch (err) {
+    console.error('Review submit error:', err);
     res.redirect('/track');
   }
 });
 
-// Login & Registration
+// ==========================================
+// LOGIN, REGISTER & LOGOUT
+// ==========================================
 app.get('/login', (req, res) => {
   if (req.session && req.session.isSuperAdmin) return res.redirect('/superadmin');
   if (req.session && req.session.wingaId) return res.redirect('/admin');
@@ -1835,30 +2119,30 @@ app.get('/login', (req, res) => {
   `);
 });
 
-app.post('/login', rateLimitAuth(6, 15 * 60 * 1000), async (req, res) => {
+app.post('/login', rateLimitAuth(10, 15 * 60 * 1000), async (req, res) => {
   try {
     const identifier = (req.body.phone || '').trim();
     const password = (req.body.password || '').trim();
-    const superAdminPhone1 = process.env.SUPERADMIN_PHONE_1 || '0700000001';
-    const superAdminPass1 = process.env.SUPERADMIN_PASS_1 || 'SuperSecurePass123!';
-    const superAdminPhone2 = process.env.SUPERADMIN_PHONE_2 || '0700000002';
-    const superAdminPass2 = process.env.SUPERADMIN_PASS_2 || 'SuperSecurePass456!';
 
-    if ((identifier === superAdminPhone1 && password === superAdminPass1) ||
-        (identifier === superAdminPhone2 && password === superAdminPass2)) {
+    if (isSuperAdminLogin(identifier, password)) {
       req.session.isSuperAdmin = true;
+      req.session.superAdminPhone = normalizePhone(identifier);
       return res.redirect('/superadmin');
     }
 
-    const matchedWinga = await db('wingas').where({ phone: identifier }).first();
-    if (matchedWinga && await bcrypt.compare(password, matchedWinga.password)) {
+    const wingas = await db('wingas').select('*');
+    const matchedWinga = wingas.find(w => isSamePhone(w.phone, identifier));
+    if (matchedWinga && (await bcrypt.compare(password, matchedWinga.password))) {
       req.session.wingaId = matchedWinga.id;
       req.session.wingaName = matchedWinga.name;
       return res.redirect('/admin');
     }
 
-    res.send('❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>');
+    res.send(
+      '❌ Taarifa za kuingia sio sahihi. <br><a href="/login">Jaribu Tena</a>'
+    );
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).send('Hitilafu ya Server.');
   }
 });
@@ -1944,15 +2228,26 @@ app.post('/register', async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
     const phone = (req.body.phone || '').trim();
-    const fullLocation = buildLocationString(req.body.region, req.body.district, req.body.ward, req.body.street, req.body.customStreet);
+    const fullLocation = buildLocationString(
+      req.body.region,
+      req.body.district,
+      req.body.ward,
+      req.body.street,
+      req.body.customStreet
+    );
     const password = (req.body.password || '').trim();
 
     if (!name || !phone || !fullLocation || !password) {
-      return res.send('❌ Tafadhali jaza taarifa zote na eneo kamili. <br><a href="/register">Jaribu Tena</a>');
+      return res.send(
+        '❌ Tafadhali jaza taarifa zote na eneo kamili. <br><a href="/register">Jaribu Tena</a>'
+      );
     }
-    const existing = await db('wingas').where({ phone }).first();
-    if (existing) {
-      return res.send('❌ Namba hii ya simu tayari imesajiliwa! <br><a href="/login">Ingia Hapa</a>');
+
+    const existingWingas = await db('wingas').select('*');
+    if (existingWingas.some(w => isSamePhone(w.phone, phone))) {
+      return res.send(
+        '❌ Namba hii ya simu tayari imesajiliwa! <br><a href="/login">Ingia Hapa</a>'
+      );
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -1989,14 +2284,18 @@ app.all('/logout', (req, res) => {
   });
 });
 
-// Seller Dashboard (/admin)
+// ==========================================
+// SELLER DASHBOARD (/admin)
+// ==========================================
 app.get('/admin', requireWinga, async (req, res) => {
   try {
     const currentWinga = await db('wingas').where({ id: req.session.wingaId }).first();
     const botPhone = process.env.BOT_PHONE_NUMBER || '255678143403';
 
     if (currentWinga && currentWinga.status === 'suspended') {
-      const renewalMsg = encodeURIComponent(`Habari Admin, nimefanya malipo ya siku 30 ya duka langu (${currentWinga.name} - ${currentWinga.phone}). Naomba unifungulie akaunti yangu.`);
+      const renewalMsg = encodeURIComponent(
+        `Habari Admin, nimefanya malipo ya siku 30 ya duka langu (${currentWinga.name} - ${currentWinga.phone}). Naomba unifungulie akaunti yangu.`
+      );
       return res.send(`
       <!DOCTYPE html>
       <html lang="sw">
@@ -2028,8 +2327,12 @@ app.get('/admin', requireWinga, async (req, res) => {
 
     const currentWingaId = req.session.wingaId;
     const currentWingaName = req.session.wingaName;
-    const products = await db('products').where({ wingaId: currentWingaId }).orderBy('id', 'desc');
-    const orders = await db('orders').where({ wingaId: currentWingaId }).orderBy('orderId', 'desc');
+    const products = await db('products')
+      .where({ wingaId: currentWingaId })
+      .orderBy('id', 'desc');
+    const orders = await db('orders')
+      .where({ wingaId: currentWingaId })
+      .orderBy('orderId', 'desc');
     const reviews = await db('reviews').select('*');
 
     let subscriptionBanner = '';
@@ -2037,10 +2340,16 @@ app.get('/admin', requireWinga, async (req, res) => {
       const expiryDate = new Date(currentWinga.expiryDate);
       const today = new Date();
       const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-      const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', year: 'numeric' });
+      const formattedExpiry = expiryDate.toLocaleDateString('sw-TZ', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
 
       if (daysLeft <= 5) {
-        const renewalMsg = encodeURIComponent(`Habari Admin, naomba niongezewe siku 30 za duka langu (${currentWinga.name}).`);
+        const renewalMsg = encodeURIComponent(
+          `Habari Admin, naomba niongezewe siku 30 za duka langu (${currentWinga.name}).`
+        );
         subscriptionBanner = `
         <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 12px; border-radius: 8px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px;">
           <span>⚠️ Umebakisha <strong>siku ${daysLeft > 0 ? daysLeft : 0}</strong> (Inaisha: ${formattedExpiry}). Wasiliana na Admin kuongeza siku!</span>
@@ -2072,94 +2381,110 @@ app.get('/admin', requireWinga, async (req, res) => {
     });
     const netProfit = totalRevenue - totalCost;
     const shopUrl = `${PUBLIC_URL}/catalog?shop=${currentWingaId}`;
-    const shareWhatsAppText = encodeURIComponent(`Habari! Karibu utazame bidhaa na uagize kupitia duka langu hapa:\n${shopUrl}`);
+    const shareWhatsAppText = encodeURIComponent(
+      `Habari! Karibu utazame bidhaa na uagize kupitia duka langu hapa:\n${shopUrl}`
+    );
 
-    let orderRows = orders.map(o => {
-      const currentStatus = o.status || 'Pending';
-      const rev = reviews.find(r => Number(r.orderId) === Number(o.orderId));
-      let badgeStyle = 'background:#ffc107; color:#000;';
-      if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
-      if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
+    let orderRows = orders
+      .map(o => {
+        const currentStatus = o.status || 'Pending';
+        const rev = reviews.find(r => Number(r.orderId) === Number(o.orderId));
+        let badgeStyle = 'background:#ffc107; color:#000;';
+        if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
+        if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
 
-      const matchedProduct = findMatchedProductForOrder(o, products);
-
-      let productImgHtml = '📦';
-      if (matchedProduct) {
-        const images = getProductImages(matchedProduct);
-        if (images.length > 0) {
-          const thumbHtml = images.map(img =>
-            `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
-          ).join('');
-          productImgHtml = `<div style="display: flex; gap: 4px; align-items: center; max-width: 110px; overflow-x: auto;">${thumbHtml}</div>`;
+        const matchedProduct = findMatchedProductForOrder(o, products);
+        let productImgHtml = '📦';
+        if (matchedProduct) {
+          const images = getProductImages(matchedProduct);
+          if (images.length > 0) {
+            const thumbHtml = images
+              .map(
+                img =>
+                  `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
+              )
+              .join('');
+            productImgHtml = `<div style="display: flex; gap: 4px; align-items: center; max-width: 110px; overflow-x: auto;">${thumbHtml}</div>`;
+          }
         }
-      }
 
-      let reviewCell = rev ? `${'⭐'.repeat(Math.max(1, Math.min(5, Number(rev.rating) || 5)))}<br><small>"${escapeHtml(rev.comment)}"</small>` : '<em style="color:#999; font-size:12px;">Hamna feedback</em>';
-      return `
-      <tr>
-        <td>${productImgHtml}</td>
-        <td><strong>#${o.orderId}</strong></td>
-        <td>${escapeHtml(o.productName)}</td>
-        <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
-        <td>${escapeHtml(o.location)}</td>
-        <td>${escapeHtml(o.customerPhone)}</td>
-        <td><span style="padding: 3px 7px; border-radius: 12px; font-size: 10px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
-        <td>${reviewCell}</td>
-        <td>
-          <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
-            <a href="/admin/order/invoice?id=${o.orderId}" target="_blank" style="background:#6c757d; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none; font-weight:bold;">📄 Risiti</a>
-            <form action="/admin/order/status" method="POST" style="display:inline-flex; gap: 4px;">
-              <input type="hidden" name="orderId" value="${o.orderId}">
-              ${currentStatus !== 'Dispatched' && currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Dispatched" style="background:#17a2b8; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🚚 Dispatch</button>` : ''}
-              ${currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Completed" style="background:#28a745; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✅ Complete</button>` : ''}
-            </form>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
+        let reviewCell = rev
+          ? `${'⭐'.repeat(Math.max(1, Math.min(5, Number(rev.rating) || 5)))}<br><small>"${escapeHtml(rev.comment)}"</small>`
+          : '<em style="color:#999; font-size:12px;">Hamna feedback</em>';
 
-    let productRows = products.map(p => {
-      const images = getProductImages(p);
-      let productImgHtml = '📦';
-      if (images.length > 0) {
-        const thumbHtml = images.map(img =>
-          `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
-        ).join('');
-        productImgHtml = `<div style="display: flex; gap: 4px; align-items: center;">${thumbHtml}</div>`;
-      }
+        return `
+        <tr>
+          <td>${productImgHtml}</td>
+          <td><strong>#${o.orderId}</strong></td>
+          <td>${escapeHtml(o.productName)}</td>
+          <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
+          <td>${escapeHtml(o.location)}</td>
+          <td>${escapeHtml(o.customerPhone)}</td>
+          <td><span style="padding: 3px 7px; border-radius: 12px; font-size: 10px; font-weight: bold; ${badgeStyle}">${currentStatus}</span></td>
+          <td>${reviewCell}</td>
+          <td>
+            <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+              <a href="/admin/order/invoice?id=${o.orderId}" target="_blank" style="background:#6c757d; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none; font-weight:bold;">📄 Risiti</a>
+              <form action="/admin/order/status" method="POST" style="display:inline-flex; gap: 4px;">
+                <input type="hidden" name="orderId" value="${o.orderId}">
+                ${currentStatus !== 'Dispatched' && currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Dispatched" style="background:#17a2b8; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🚚 Dispatch</button>` : ''}
+                ${currentStatus !== 'Completed' ? `<button type="submit" name="status" value="Completed" style="background:#28a745; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">✅ Complete</button>` : ''}
+              </form>
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join('');
 
-      const editData = escapeHtml(JSON.stringify({
-        id: p.id,
-        name: p.name || '',
-        category: p.category || 'General / Vinginevyo',
-        buyingPrice: Number(p.buyingPrice || 0),
-        sellingPrice: Number(p.sellingPrice || p.price || 0),
-        size: p.size || 'Standard',
-        colors: p.colors || 'Kama pichani',
-        images
-      }));
+    let productRows = products
+      .map(p => {
+        const images = getProductImages(p);
+        let productImgHtml = '📦';
+        if (images.length > 0) {
+          const thumbHtml = images
+            .map(
+              img =>
+                `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" title="Bonyeza kukuza" style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;">`
+            )
+            .join('');
+          productImgHtml = `<div style="display: flex; gap: 4px; align-items: center;">${thumbHtml}</div>`;
+        }
 
-      return `
-      <tr class="seller-product-row">
-        <td><strong>#${p.id}</strong></td>
-        <td>${productImgHtml}</td>
-        <td class="prod-name">${escapeHtml(p.name)}</td>
-        <td class="prod-cat">${escapeHtml(p.category || 'General')}</td>
-        <td>TSh ${Number(p.buyingPrice || 0).toLocaleString()}</td>
-        <td>TSh ${Number(p.sellingPrice || p.price || 0).toLocaleString()}</td>
-        <td>${escapeHtml(p.size || 'Standard')}</td>
-        <td>${escapeHtml(p.colors || 'Kama pichani')}</td>
-        <td>
-          <div style="display:flex; gap:5px; align-items:center;">
-            <button type="button" class="edit-prod-btn" data-edit="${editData}" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold; cursor:pointer;">✏️ Edit</button>
-            <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
-              <input type="hidden" name="id" value="${p.id}">
-              <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
-            </form>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
+        const editData = escapeHtml(
+          JSON.stringify({
+            id: p.id,
+            name: p.name || '',
+            category: p.category || 'General / Vinginevyo',
+            buyingPrice: Number(p.buyingPrice || 0),
+            sellingPrice: Number(p.sellingPrice || p.price || 0),
+            size: p.size || 'Standard',
+            colors: p.colors || 'Kama pichani',
+            images
+          })
+        );
+
+        return `
+        <tr class="seller-product-row">
+          <td><strong>#${p.id}</strong></td>
+          <td>${productImgHtml}</td>
+          <td class="prod-name">${escapeHtml(p.name)}</td>
+          <td class="prod-cat">${escapeHtml(p.category || 'General')}</td>
+          <td>TSh ${Number(p.buyingPrice || 0).toLocaleString()}</td>
+          <td>TSh ${Number(p.sellingPrice || p.price || 0).toLocaleString()}</td>
+          <td>${escapeHtml(p.size || 'Standard')}</td>
+          <td>${escapeHtml(p.colors || 'Kama pichani')}</td>
+          <td>
+            <div style="display:flex; gap:5px; align-items:center;">
+              <button type="button" class="edit-prod-btn" data-edit="${editData}" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold; cursor:pointer;">✏️ Edit</button>
+              <form action="/admin/product/delete" method="POST" onsubmit="return confirm('Una uhakika unataka kufuta bidhaa hii?');" style="display:inline;">
+                <input type="hidden" name="id" value="${p.id}">
+                <button type="submit" style="background:#dc3545; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join('');
 
     let alertMessage = '';
     if (req.query.added === 'true') {
@@ -2172,21 +2497,38 @@ app.get('/admin', requireWinga, async (req, res) => {
     }
 
     const availableColorChoices = [
-      'Nyeusi (Black)', 'Nyeupe (White)', 'Nyekundu (Red)', 'Bluu (Blue)',
-      'Kijani (Green)', 'Njano (Yellow)', 'Brown / Kahawia', 'Grey / Kijivu',
-      'Pink', 'Gold', 'Silver', 'Mchanganyiko (Multi-color)'
+      'Nyeusi (Black)',
+      'Nyeupe (White)',
+      'Nyekundu (Red)',
+      'Bluu (Blue)',
+      'Kijani (Green)',
+      'Njano (Yellow)',
+      'Brown / Kahawia',
+      'Grey / Kijivu',
+      'Pink',
+      'Gold',
+      'Silver',
+      'Mchanganyiko (Multi-color)'
     ];
-    const colorCheckboxesHtml = availableColorChoices.map(col => `
+    const colorCheckboxesHtml = availableColorChoices
+      .map(
+        col => `
       <label style="display:inline-flex; align-items:center; gap:5px; font-weight:normal; font-size:12px; background:#f8f9fa; padding:5px 9px; border-radius:6px; border:1px solid #ddd; cursor:pointer;">
         <input type="checkbox" name="colors" value="${escapeHtml(col)}" style="width:auto; margin:0;"> ${escapeHtml(col)}
       </label>
-    `).join('');
+    `
+      )
+      .join('');
 
-    const editColorCheckboxesHtml = availableColorChoices.map(col => `
+    const editColorCheckboxesHtml = availableColorChoices
+      .map(
+        col => `
       <label style="display:inline-flex; align-items:center; gap:5px; font-weight:normal; font-size:12px; background:#f8f9fa; padding:5px 8px; border-radius:6px; border:1px solid #ddd; cursor:pointer;">
         <input type="checkbox" class="edit-color-cb" name="colors" value="${escapeHtml(col)}" style="width:auto; margin:0;"> ${escapeHtml(col)}
       </label>
-    `).join('');
+    `
+      )
+      .join('');
 
     res.send(`
     <!DOCTYPE html>
@@ -2245,7 +2587,7 @@ app.get('/admin', requireWinga, async (req, res) => {
             <button type="button" class="close-btn" onclick="closeAdminHelp()">&times;</button>
             <h3 style="margin-top:0; color:#111; font-size:18px;" id="adminHelpTitle">❓ Mwongozo wa Muuzaji (Winga Guide)</h3>
             <div style="font-size: 13px; color: #444; line-height: 1.5; text-align: left;">
-              <p><strong>1. Kuweka Bidhaa Mpya:</strong><br>Jaza fomu ya bidhaa, chagua rangi zilizopo na picha hadi 4 (utaona preview kabla ya kupakia), kisha bofya "Upload & Add to Catalog".</p>
+              <p><strong>1. Kuweka Bidhaa Mpya:</strong><br>Jaza fomu ya bidhaa, chagua rangi zilizopo na picha hadi 4, kisha bofya "Upload & Add to Catalog".</p>
               <p><strong>2. Kuhariri Bidhaa:</strong><br>Bonyeza "✏️ Edit" kwenye bidhaa yoyote kwenye orodha yako kubadili jina, bei, rangi, saizi au picha.</p>
               <p><strong>3. Kusimamia Oda:</strong><br>Badilisha status kuwa "Dispatched" au "Completed" ili mteja aweze kutoa maoni/nyota.</p>
             </div>
@@ -2300,7 +2642,7 @@ app.get('/admin', requireWinga, async (req, res) => {
                 <div id="editCurrentImages" class="preview-grid"></div>
               </div>
               <div class="form-group">
-                <label>Badilisha Picha (Hiari - Max 4 mpya; ukiacha tupu zitabaki za sasa):</label>
+                <label>Badilisha Picha (Hiari - Max 4 mpya):</label>
                 <input type="file" name="images" id="editImageInput" accept="image/*" multiple onchange="previewEditImages(this)">
                 <div id="editNewImagePreview" class="preview-grid"></div>
               </div>
@@ -2672,11 +3014,15 @@ app.get('/admin', requireWinga, async (req, res) => {
 app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   try {
     const orderId = parseInt(req.query.id, 10);
-    const order = await db('orders').where({ orderId, wingaId: req.session.wingaId }).first();
+    const order = await db('orders')
+      .where({ orderId, wingaId: req.session.wingaId })
+      .first();
     if (!order) return res.send('❌ Oda haipatikani.');
     const winga = await db('wingas').where({ id: req.session.wingaId }).first();
     const shopLink = `${PUBLIC_URL}/catalog?shop=${winga.id}`;
-    res.send(`<!DOCTYPE html><html lang="sw"><head><meta charset="UTF-8"><title>Risiti #${order.orderId}</title><style>body{font-family:monospace;padding:20px;max-width:420px;margin:20px auto;border:1px solid #ddd;border-radius:8px;}.center{text-align:center;}hr{border:dashed 1px #888;}.btn-print{background:#007bff;color:white;border:none;padding:12px;width:100%;cursor:pointer;font-weight:bold;margin-top:20px;border-radius:6px;}@media print{.btn-print{display:none;}}</style></head><body><div class="center"><h2>🛍️ ${escapeHtml(winga.name)}</h2><p>Simu: ${escapeHtml(winga.phone)}</p><p style="font-size:12px;"><a href="${shopLink}">${shopLink}</a></p><hr><h3>RISITI YA MAUZO</h3></div><p><strong>Oda:</strong> #${order.orderId}</p><p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p><p><strong>Simu:</strong> ${escapeHtml(order.customerPhone)}</p><p><strong>Eneo:</strong> ${escapeHtml(order.location)}</p><hr><p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p><p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p><hr><p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p><button class="btn-print" onclick="window.print()">🖨️ Chapisha / PDF</button></body></html>`);
+    res.send(
+      `<!DOCTYPE html><html lang="sw"><head><meta charset="UTF-8"><title>Risiti #${order.orderId}</title><style>body{font-family:monospace;padding:20px;max-width:420px;margin:20px auto;border:1px solid #ddd;border-radius:8px;}.center{text-align:center;}hr{border:dashed 1px #888;}.btn-print{background:#007bff;color:white;border:none;padding:12px;width:100%;cursor:pointer;font-weight:bold;margin-top:20px;border-radius:6px;}@media print{.btn-print{display:none;}}</style></head><body><div class="center"><h2>🛍️ ${escapeHtml(winga.name)}</h2><p>Simu: ${escapeHtml(winga.phone)}</p><p style="font-size:12px;"><a href="${shopLink}">${shopLink}</a></p><hr><h3>RISITI YA MAUZO</h3></div><p><strong>Oda:</strong> #${order.orderId}</p><p><strong>Tarehe:</strong> ${new Date(order.date).toLocaleDateString('sw-TZ')}</p><p><strong>Simu:</strong> ${escapeHtml(order.customerPhone)}</p><p><strong>Eneo:</strong> ${escapeHtml(order.location)}</p><hr><p><strong>Bidhaa:</strong> ${escapeHtml(order.productName)}</p><p><strong>Bei:</strong> TSh ${Number(order.sellingPrice || 0).toLocaleString()}</p><hr><p class="center"><strong>Status:</strong> ${escapeHtml(order.status)}</p><button class="btn-print" onclick="window.print()">🖨️ Chapisha / PDF</button></body></html>`
+    );
   } catch (err) {
     res.status(500).send('Hitilafu kwenye risiti.');
   }
@@ -2684,7 +3030,7 @@ app.get('/admin/order/invoice', requireWinga, async (req, res) => {
 
 // Add Product
 app.post('/admin/add', requireWinga, (req, res) => {
-  upload(req, res, async (err) => {
+  upload(req, res, async err => {
     if (err) {
       console.error('Multer Upload Error:', err.message);
       return res.redirect('/admin?error=upload&reason=' + encodeURIComponent(err.message));
@@ -2692,14 +3038,22 @@ app.post('/admin/add', requireWinga, (req, res) => {
     try {
       const { name, category, buyingPrice, sellingPrice, size, colors, customColors } = req.body;
       if (!name || !name.trim()) {
-        return res.redirect('/admin?error=upload&reason=' + encodeURIComponent('Jina la bidhaa linahitajika'));
+        return res.redirect(
+          '/admin?error=upload&reason=' + encodeURIComponent('Jina la bidhaa linahitajika')
+        );
       }
       const imageUrls = await uploadBuffersToCloudinary(req.files || []);
 
-      const selectedList = Array.isArray(colors) ? colors : (colors ? [colors] : []);
-      const extraList = customColors ? customColors.split(',').map(c => c.trim()).filter(Boolean) : [];
+      const selectedList = Array.isArray(colors) ? colors : colors ? [colors] : [];
+      const extraList = customColors
+        ? customColors
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean)
+        : [];
       const mergedColors = [...new Set([...selectedList, ...extraList])];
-      const finalColorsStr = mergedColors.length > 0 ? mergedColors.join(', ') : 'Kama pichani';
+      const finalColorsStr =
+        mergedColors.length > 0 ? mergedColors.join(', ') : 'Kama pichani';
 
       const newProductData = {
         wingaId: req.session.wingaId,
@@ -2723,37 +3077,62 @@ app.post('/admin/add', requireWinga, (req, res) => {
       res.redirect('/admin?added=true');
     } catch (dbErr) {
       console.error('Cloudinary / DB Insert error:', dbErr);
-      res.redirect('/admin?error=upload&reason=' + encodeURIComponent(dbErr.message || 'Hitilafu ya kupakia picha'));
+      res.redirect(
+        '/admin?error=upload&reason=' +
+          encodeURIComponent(dbErr.message || 'Hitilafu ya kupakia picha')
+      );
     }
   });
 });
 
-// Edit Product Route
+// Edit Product
 app.post('/admin/product/edit', requireWinga, (req, res) => {
-  upload(req, res, async (err) => {
+  upload(req, res, async err => {
     if (err) {
       console.error('Edit Multer Upload Error:', err.message);
       return res.redirect('/admin?error=upload&reason=' + encodeURIComponent(err.message));
     }
     try {
       const prodId = parseInt(req.body.id, 10);
-      const existing = await db('products').where({ id: prodId, wingaId: req.session.wingaId }).first();
+      const existing = await db('products')
+        .where({ id: prodId, wingaId: req.session.wingaId })
+        .first();
       if (!existing) {
-        return res.redirect('/admin?error=upload&reason=' + encodeURIComponent('Bidhaa haikupatikana'));
+        return res.redirect(
+          '/admin?error=upload&reason=' + encodeURIComponent('Bidhaa haikupatikana')
+        );
       }
 
       const { name, category, buyingPrice, sellingPrice, size, colors, customColors } = req.body;
-      const selectedList = Array.isArray(colors) ? colors : (colors ? [colors] : []);
-      const extraList = customColors ? customColors.split(',').map(c => c.trim()).filter(Boolean) : [];
+      const selectedList = Array.isArray(colors) ? colors : colors ? [colors] : [];
+      const extraList = customColors
+        ? customColors
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean)
+        : [];
       const mergedColors = [...new Set([...selectedList, ...extraList])];
-      const finalColorsStr = mergedColors.length > 0 ? mergedColors.join(', ') : (existing.colors || 'Kama pichani');
+      const finalColorsStr =
+        mergedColors.length > 0 ? mergedColors.join(', ') : existing.colors || 'Kama pichani';
 
       const updatePayload = {
         name: (name || existing.name).trim(),
         category: (category || existing.category || 'General').trim(),
-        buyingPrice: parseFloat(buyingPrice !== undefined && buyingPrice !== '' ? buyingPrice : existing.buyingPrice || 0),
-        sellingPrice: parseFloat(sellingPrice !== undefined && sellingPrice !== '' ? sellingPrice : existing.sellingPrice || 0),
-        price: parseFloat(sellingPrice !== undefined && sellingPrice !== '' ? sellingPrice : existing.price || 0),
+        buyingPrice: parseFloat(
+          buyingPrice !== undefined && buyingPrice !== ''
+            ? buyingPrice
+            : existing.buyingPrice || 0
+        ),
+        sellingPrice: parseFloat(
+          sellingPrice !== undefined && sellingPrice !== ''
+            ? sellingPrice
+            : existing.sellingPrice || 0
+        ),
+        price: parseFloat(
+          sellingPrice !== undefined && sellingPrice !== ''
+            ? sellingPrice
+            : existing.price || 0
+        ),
         size: (size || existing.size || 'Standard').trim(),
         colors: finalColorsStr
       };
@@ -2763,19 +3142,28 @@ app.post('/admin/product/edit', requireWinga, (req, res) => {
         updatePayload.imageUrl = JSON.stringify(newImageUrls);
       }
 
-      await db('products').where({ id: prodId, wingaId: req.session.wingaId }).update(updatePayload);
+      await db('products')
+        .where({ id: prodId, wingaId: req.session.wingaId })
+        .update(updatePayload);
       res.redirect('/admin?updated=true');
     } catch (dbErr) {
       console.error('Edit product error:', dbErr);
-      res.redirect('/admin?error=upload&reason=' + encodeURIComponent(dbErr.message || 'Hitilafu kuhariri bidhaa'));
+      res.redirect(
+        '/admin?error=upload&reason=' +
+          encodeURIComponent(dbErr.message || 'Hitilafu kuhariri bidhaa')
+      );
     }
   });
 });
 
 app.post('/admin/product/delete', requireWinga, async (req, res) => {
   try {
-    await db('products').where({ id: parseInt(req.body.id, 10), wingaId: req.session.wingaId }).del();
-  } catch (err) {}
+    await db('products')
+      .where({ id: parseInt(req.body.id, 10), wingaId: req.session.wingaId })
+      .del();
+  } catch (err) {
+    console.error('Delete product error:', err);
+  }
   res.redirect('/admin');
 });
 
@@ -2783,15 +3171,19 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
     const orderId = parseInt(req.body.orderId, 10);
     const status = req.body.status;
-    const order = await db('orders').where({ orderId, wingaId: req.session.wingaId }).first();
+    const order = await db('orders')
+      .where({ orderId, wingaId: req.session.wingaId })
+      .first();
     if (order) {
-      await db('orders').where({ orderId, wingaId: req.session.wingaId }).update({ status });
+      await db('orders')
+        .where({ orderId, wingaId: req.session.wingaId })
+        .update({ status });
+
       let customerChatId = order.senderJid;
-      if (!customerChatId || !customerChatId.includes('@s.whatsapp.net')) {
-        let phone = (order.customerPhone || '').trim().replace('+', '');
-        if (phone.startsWith('0')) phone = '255' + phone.slice(1);
-        if (phone) customerChatId = phone + '@s.whatsapp.net';
+      if (!customerChatId || !String(customerChatId).includes('@')) {
+        customerChatId = await resolveWhatsAppRecipientJid(order.customerPhone);
       }
+
       if (customerChatId && isBotSocketReady()) {
         const trackUrl = `${PUBLIC_URL}/track?id=${order.orderId}`;
         let statusMessage = '';
@@ -2812,19 +3204,31 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
             `Au tuma ujumbe hapa WhatsApp:\n` +
             `*!maoni ${order.orderId} [nyota 1-5] [maoni yako]*`;
         }
-        if (statusMessage) await sock.sendMessage(customerChatId, { text: statusMessage });
+        if (statusMessage) {
+          await sock.sendMessage(customerChatId, { text: statusMessage });
+        }
       }
     }
-  } catch (err) {}
+  } catch (err) {
+    console.error('Order status update error:', err);
+  }
   res.redirect('/admin');
 });
 
 app.post('/admin/change-password', requireWinga, async (req, res) => {
   const wingaId = req.session.wingaId;
   const { oldPassword, newPassword, confirmPassword } = req.body;
-  if (!oldPassword || !newPassword || !confirmPassword) return res.status(400).json({ message: 'Tafadhali jaza nafasi zote.' });
-  if (newPassword !== confirmPassword) return res.status(400).json({ message: 'Nenosiri jipya halifanani.' });
-  if (newPassword.length < 6) return res.status(400).json({ message: 'Nenosiri lazima liwe na angalau herufi 6.' });
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({ message: 'Tafadhali jaza nafasi zote.' });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ message: 'Nenosiri jipya halifanani.' });
+  }
+  if (newPassword.length < 6) {
+    return res
+      .status(400)
+      .json({ message: 'Nenosiri lazima liwe na angalau herufi 6.' });
+  }
   try {
     const winga = await db('wingas').where({ id: wingaId }).first();
     if (!winga || !(await bcrypt.compare(oldPassword, winga.password))) {
@@ -2838,37 +3242,44 @@ app.post('/admin/change-password', requireWinga, async (req, res) => {
   }
 });
 
-// Forgot & Reset Password (with improved WhatsApp connection check)
+// ==========================================
+// FORGOT & RESET PASSWORD (WHATSAPP OTP)
+// ==========================================
 app.get('/forgot-password', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:340px;"><h2>🔑 Umesahau Nenosiri?</h2><p style="font-size:12px;color:#555;">Weka namba yako ya simu kupokea OTP WhatsApp.</p><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;border:1px solid #4092e5;border-radius:4px;box-sizing:border-box;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;border-radius:4px;cursor:pointer;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;color:#007bff;text-decoration:none;font-size:13px;">← Rudi Login</a></div></body></html>`);
+  res.send(
+    `<!DOCTYPE html><html><head><title>Umesahau Nenosiri</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;"><div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:340px;"><h2>🔑 Umesahau Nenosiri?</h2><p style="font-size:12px;color:#555;">Weka namba yako ya simu kupokea OTP WhatsApp.</p><form action="/forgot-password" method="POST"><input type="text" name="phone" placeholder="0712345678" required style="width:100%;padding:11px;margin:10px 0;border:1px solid #4092e5;border-radius:4px;box-sizing:border-box;"><button type="submit" style="background:#007bff;color:white;border:none;padding:12px;width:100%;font-weight:bold;border-radius:4px;cursor:pointer;">Tuma Kodi</button></form><a href="/login" style="display:block;margin-top:15px;color:#007bff;text-decoration:none;font-size:13px;">← Rudi Login</a></div></body></html>`
+  );
 });
 
-app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) => {
+app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) => {
   try {
     if (!isBotSocketReady()) {
-      return res.status(503).send(
-        `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
-        `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
-        `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code ikiwa inaonekana) na subiri sekunde 15–30 kisha ujaribu tena.</p>` +
-        `<p style="font-size:12px;color:#777;">Status: ready=${isBotSocketReady()}, reconnecting=${isReconnecting}, lastCode=${lastDisconnectCode || 'none'}</p>` +
-        `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
-        `</div>`
-      );
+      return res
+        .status(503)
+        .send(
+          `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
+            `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
+            `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code ikiwa inaonekana) na subiri sekunde chache kisha ujaribu tena.</p>` +
+            `<p style="font-size:12px;color:#777;">Status: ready=${isBotSocketReady()}, reconnecting=${isReconnecting}, lastCode=${lastDisconnectCode || 'none'}</p>` +
+            `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
+            `</div>`
+        );
     }
 
     const rawPhone = (req.body.phone || '').trim();
-    let cleanedPhone = rawPhone.replace(/\D/g, '');
-    if (cleanedPhone.startsWith('0')) cleanedPhone = '255' + cleanedPhone.slice(1);
-    const localZeroPhone = cleanedPhone.startsWith('255') ? '0' + cleanedPhone.slice(3) : rawPhone;
+    const cleanedPhone = normalizePhone(rawPhone);
+    if (!cleanedPhone) {
+      return res.send(
+        '❌ Tafadhali weka namba sahihi ya simu. <br><a href="/forgot-password">Jaribu Tena</a>'
+      );
+    }
 
-    const winga = await db('wingas')
-      .where({ phone: rawPhone })
-      .orWhere({ phone: cleanedPhone })
-      .orWhere({ phone: localZeroPhone })
-      .first();
-
+    const wingas = await db('wingas').select('*');
+    const winga = wingas.find(w => isSamePhone(w.phone, rawPhone));
     if (!winga) {
-      return res.send('❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>');
+      return res.send(
+        '❌ Namba hii haijasajiliwa. <br><a href="/forgot-password">Jaribu Tena</a>'
+      );
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -2879,8 +3290,14 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
       expiresAt: new Date(Date.now() + 10 * 60 * 1000)
     });
 
-    await sock.sendMessage(`${cleanedPhone}@s.whatsapp.net`, {
-      text: `🔑 Kodi yako ya OTP ni: *${otp}* (Inaisha baada ya dakika 10).`
+    const targetJid = await resolveWhatsAppRecipientJid(cleanedPhone);
+    await sock.sendMessage(targetJid, {
+      text:
+        `🔑 *KODI YA KUBADILISHA NENOSIRI (PASSWORD RESET)*\n` +
+        `-----------------------------------\n` +
+        `Habari *${winga.name}*, kodi yako ya OTP ni:\n\n` +
+        `👉 *${otp}*\n\n` +
+        `⚠️ Kodi hii itaisha muda wake ndani ya dakika 10.`
     });
 
     res.send(`
@@ -2910,7 +3327,7 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
     <body style="font-family:sans-serif;background:rgb(106,136,232);display:flex;justify-content:center;align-items:center;height:100vh;margin:0;padding:15px;">
       <div style="background:white;padding:25px;border-radius:8px;text-align:center;width:100%;max-width:340px;">
         <h2>🔐 Weka Nenosiri Jipya</h2>
-        <p style="font-size:12px;color:#28a745;font-weight:bold;">✅ OTP imetumwa WhatsApp.</p>
+        <p style="font-size:12px;color:#28a745;font-weight:bold;">✅ OTP imetumwa WhatsApp (${escapeHtml(winga.phone)}).</p>
         <form action="/reset-password" method="POST">
           <input type="hidden" name="phone" value="${escapeHtml(winga.phone)}">
           <input type="text" name="otp" placeholder="Kodi ya OTP" required style="width:100%;padding:10px;margin:8px 0;box-sizing:border-box;">
@@ -2929,26 +3346,46 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
     </html>`);
   } catch (err) {
     console.error('Forgot password error:', err);
-    res.status(500).send(`❌ Hitilafu wakati wa kutuma OTP: ${escapeHtml(err.message)} <br><a href="/forgot-password">Jaribu Tena</a>`);
+    res
+      .status(500)
+      .send(
+        `❌ Hitilafu wakati wa kutuma OTP: ${escapeHtml(err.message)} <br><a href="/forgot-password">Jaribu Tena</a>`
+      );
   }
 });
 
-app.post('/reset-password', rateLimitAuth(6, 15 * 60 * 1000), async (req, res) => {
+app.post('/reset-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) => {
   try {
     const { phone, otp, newPassword, confirmPassword } = req.body;
-    if (newPassword !== confirmPassword || newPassword.length < 6) return res.send('❌ Nenosiri hazifanani au ni fupi mno.');
-    const rec = await db('password_resets').where({ phone: phone.trim(), otp: otp.trim() }).where('expiresAt', '>', new Date()).first();
-    if (!rec) return res.send('❌ Kodi si sahihi au imeisha muda wake.');
+    if (newPassword !== confirmPassword || (newPassword || '').length < 6) {
+      return res.send(
+        '❌ Nenosiri hazifanani au ni fupi mno (angalau herufi 6). <br><a href="/forgot-password">Jaribu Tena</a>'
+      );
+    }
+    const rec = await db('password_resets')
+      .where({ phone: (phone || '').trim(), otp: (otp || '').trim() })
+      .where('expiresAt', '>', new Date())
+      .first();
+    if (!rec) {
+      return res.send(
+        '❌ Kodi si sahihi au imeisha muda wake. <br><a href="/forgot-password">Omba Mpya</a>'
+      );
+    }
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
-    await db('wingas').where({ phone: phone.trim() }).update({ password: hashedPassword });
-    await db('password_resets').where({ phone: phone.trim() }).del();
-    res.send('<div style="text-align:center;padding:50px;font-family:sans-serif;"><h2>🎉 Hongera! Nenosiri limebadilishwa.</h2><a href="/login">Ingia Login</a></div>');
+    await db('wingas').where({ phone: rec.phone }).update({ password: hashedPassword });
+    await db('password_resets').where({ phone: rec.phone }).del();
+    res.send(
+      '<div style="text-align:center;padding:50px;font-family:sans-serif;"><h2>🎉 Hongera! Nenosiri limebadilishwa.</h2><a href="/login">Ingia Login</a></div>'
+    );
   } catch (err) {
+    console.error('Reset password error:', err);
     res.status(500).send('Hitilafu.');
   }
 });
 
-// Super Admin Dashboard
+// ==========================================
+// SUPER ADMIN DASHBOARD & PASSWORD RESET
+// ==========================================
 app.get('/superadmin', requireSuperAdmin, async (req, res) => {
   try {
     const wingas = await db('wingas').select('*');
@@ -2958,115 +3395,148 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     let platformTotalProfit = 0;
     let platformTotalRevenue = 0;
 
-    let wingaRows = wingas.map(w => {
-      const wProducts = products.filter(p => Number(p.wingaId) === Number(w.id));
-      const wOrders = orders.filter(o => Number(o.wingaId) === Number(w.id));
-      let wingaRevenue = 0, wingaCost = 0, completedOrders = 0;
-      wOrders.forEach(o => {
-        if (o.status === 'Completed') {
-          wingaRevenue += Number(o.sellingPrice || o.price || 0);
-          wingaCost += Number(o.buyingPrice || 0);
-          completedOrders++;
+    let statusNotice = '';
+    if (req.query.reset === 'success') {
+      statusNotice = `<div style="background:#d4edda;color:#155724;border:1px solid #c3e6cb;padding:12px 16px;border-radius:8px;margin-bottom:15px;font-weight:bold;">✅ Password ya muuzaji imebadilishwa kikamilifu!</div>`;
+    } else if (req.query.reset === 'short') {
+      statusNotice = `<div style="background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;padding:12px 16px;border-radius:8px;margin-bottom:15px;font-weight:bold;">❌ Password mpya lazima iwe na angalau herufi 6!</div>`;
+    }
+
+    let wingaRows = wingas
+      .map(w => {
+        const wProducts = products.filter(p => Number(p.wingaId) === Number(w.id));
+        const wOrders = orders.filter(o => Number(o.wingaId) === Number(w.id));
+        let wingaRevenue = 0,
+          wingaCost = 0,
+          completedOrders = 0;
+        wOrders.forEach(o => {
+          if (o.status === 'Completed') {
+            wingaRevenue += Number(o.sellingPrice || o.price || 0);
+            wingaCost += Number(o.buyingPrice || 0);
+            completedOrders++;
+          }
+        });
+        const wingaProfit = wingaRevenue - wingaCost;
+        platformTotalProfit += wingaProfit;
+        platformTotalRevenue += wingaRevenue;
+
+        const statusBadge =
+          w.status === 'active'
+            ? `<span style="background:#28a745; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Active</span>`
+            : `<span style="background:#dc3545; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Suspended</span>`;
+        const isSmsOn = isSmsEnabled(w.sms_enabled);
+        const smsBadge = isSmsOn
+          ? `<span style="background:#0ea5e9; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: ON</span>`
+          : `<span style="background:#6c757d; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: OFF</span>`;
+
+        return `
+        <tr>
+          <td><strong>#${w.id}</strong></td>
+          <td>${escapeHtml(w.name)}<br><small style="color:#666;">📍 ${escapeHtml(w.location || 'Tanzania')}</small></td>
+          <td>${escapeHtml(w.phone)}</td>
+          <td>${statusBadge} ${smsBadge}</td>
+          <td>${w.expiryDate ? new Date(w.expiryDate).toLocaleDateString() : 'N/A'}</td>
+          <td>${wProducts.length} items</td>
+          <td>${completedOrders} orders</td>
+          <td style="color:#28a745; font-weight:bold;">TSh ${wingaProfit.toLocaleString()}</td>
+          <td>
+            <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+              <form action="/superadmin/winga/status" method="POST" style="display:inline;">
+                <input type="hidden" name="wingaId" value="${w.id}">
+                <input type="hidden" name="status" value="${w.status === 'suspended' ? 'active' : 'suspended'}">
+                <button type="submit" style="background:${w.status === 'suspended' ? '#28a745' : '#dc3545'}; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">${w.status === 'suspended' ? 'Activate' : 'Suspend'}</button>
+              </form>
+              <form action="/superadmin/winga/extend" method="POST" style="display:inline;">
+                <input type="hidden" name="wingaId" value="${w.id}">
+                <button type="submit" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">+30 Days</button>
+              </form>
+              <form action="/superadmin/winga/sms" method="POST" style="display:inline;">
+                <input type="hidden" name="wingaId" value="${w.id}">
+                <input type="hidden" name="sms_enabled" value="${isSmsOn ? '0' : '1'}">
+                <button type="submit" style="background:${isSmsOn ? '#6c757d' : '#0ea5e9'}; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">${isSmsOn ? 'Disable SMS' : 'Enable SMS'}</button>
+              </form>
+              <form action="/superadmin/winga/reset-password" method="POST" style="display:inline-flex; gap:4px; align-items:center;">
+                <input type="hidden" name="wingaId" value="${w.id}">
+                <input type="text" name="newPassword" placeholder="New Pass" minlength="6" style="padding:4px 6px; width:88px; font-size:11px;" required>
+                <button type="submit" style="background:#ffc107; color:#111; border:none; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:bold; cursor:pointer;">🔑 Reset Pass</button>
+              </form>
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join('');
+
+    let superadminOrderRows = orders
+      .map(o => {
+        const matchedWinga = wingas.find(w => Number(w.id) === Number(o.wingaId));
+        const matchedProduct = findMatchedProductForOrder(o, products);
+        const images = getProductImages(matchedProduct);
+
+        let photoHtml = '📦';
+        if (images.length > 0) {
+          photoHtml =
+            `<div style="display:flex; gap:4px; align-items:center;">` +
+            images
+              .map(
+                img =>
+                  `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" style="width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer;" title="Bonyeza kukuza">`
+              )
+              .join('') +
+            `</div>`;
         }
-      });
-      const wingaProfit = wingaRevenue - wingaCost;
-      platformTotalProfit += wingaProfit;
-      platformTotalRevenue += wingaRevenue;
 
-      const statusBadge = w.status === 'active'
-        ? `<span style="background:#28a745; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Active</span>`
-        : `<span style="background:#dc3545; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Suspended</span>`;
-      const isSmsOn = Boolean(w.sms_enabled);
-      const smsBadge = isSmsOn
-        ? `<span style="background:#0ea5e9; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: ON</span>`
-        : `<span style="background:#6c757d; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: OFF</span>`;
+        const currentStatus = o.status || 'Pending';
+        let badgeStyle = 'background:#ffc107; color:#000;';
+        if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
+        if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
 
-      return `
-      <tr>
-        <td><strong>#${w.id}</strong></td>
-        <td>${escapeHtml(w.name)}<br><small style="color:#666;">📍 ${escapeHtml(w.location || 'Tanzania')}</small></td>
-        <td>${escapeHtml(w.phone)}</td>
-        <td>${statusBadge} ${smsBadge}</td>
-        <td>${w.expiryDate ? new Date(w.expiryDate).toLocaleDateString() : 'N/A'}</td>
-        <td>${wProducts.length} items</td>
-        <td>${completedOrders} orders</td>
-        <td style="color:#28a745; font-weight:bold;">TSh ${wingaProfit.toLocaleString()}</td>
-        <td>
-          <div style="display:flex; gap:4px; flex-wrap:wrap;">
-            <form action="/superadmin/winga/status" method="POST" style="display:inline;">
-              <input type="hidden" name="wingaId" value="${w.id}">
-              <input type="hidden" name="status" value="${w.status === 'suspended' ? 'active' : 'suspended'}">
-              <button type="submit" style="background:${w.status === 'suspended' ? '#28a745' : '#dc3545'}; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">${w.status === 'suspended' ? 'Activate' : 'Suspend'}</button>
+        return `
+        <tr>
+          <td><strong>#${o.orderId}</strong></td>
+          <td>${photoHtml}</td>
+          <td>${escapeHtml(o.productName)}</td>
+          <td><strong>${escapeHtml(matchedWinga ? matchedWinga.name : 'Winga #' + o.wingaId)}</strong></td>
+          <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
+          <td>${escapeHtml(o.customerPhone || '-')}</td>
+          <td>${escapeHtml(o.location || '-')}</td>
+          <td><span style="padding: 3px 7px; border-radius: 12px; font-size: 10px; font-weight: bold; ${badgeStyle}">${escapeHtml(currentStatus)}</span></td>
+        </tr>`;
+      })
+      .join('');
+
+    let superadminProductRows = products
+      .map(p => {
+        const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
+        const images = getProductImages(p);
+        const mainImg = images[0]
+          ? `<img src="${escapeHtml(images[0])}" data-zoom="${escapeHtml(images[0])}" onclick="openModal(this.getAttribute('data-zoom'))" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; cursor: pointer;" title="Bonyeza kukuza">`
+          : '📦';
+        return `
+        <tr>
+          <td><strong>#${p.id}</strong></td>
+          <td>${mainImg}</td>
+          <td>${escapeHtml(p.name)}</td>
+          <td><strong>${escapeHtml(matchedWinga ? matchedWinga.name : 'Winga #' + p.wingaId)}</strong></td>
+          <td>TSh ${Number(p.sellingPrice || 0).toLocaleString()}</td>
+          <td>
+            <form action="/superadmin/product/delete" method="POST" onsubmit="return confirm('Futa bidhaa hii?');">
+              <input type="hidden" name="id" value="${p.id}">
+              <button type="submit" style="background:#dc3545; color:white; border:none; padding:5px 10px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
             </form>
-            <form action="/superadmin/winga/extend" method="POST" style="display:inline;">
-              <input type="hidden" name="wingaId" value="${w.id}">
-              <button type="submit" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">+30 Days</button>
-            </form>
-            <form action="/superadmin/winga/sms" method="POST" style="display:inline;">
-              <input type="hidden" name="wingaId" value="${w.id}">
-              <input type="hidden" name="sms_enabled" value="${isSmsOn ? '0' : '1'}">
-              <button type="submit" style="background:${isSmsOn ? '#6c757d' : '#0ea5e9'}; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">${isSmsOn ? 'Disable SMS' : 'Enable SMS'}</button>
-            </form>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
+          </td>
+        </tr>`;
+      })
+      .join('');
 
-    let superadminOrderRows = orders.map(o => {
-      const matchedWinga = wingas.find(w => Number(w.id) === Number(o.wingaId));
-      const matchedProduct = findMatchedProductForOrder(o, products);
-      const images = getProductImages(matchedProduct);
-
-      let photoHtml = '📦';
-      if (images.length > 0) {
-        photoHtml = `<div style="display:flex; gap:4px; align-items:center;">` +
-          images.map(img => `<img src="${escapeHtml(img)}" data-zoom="${escapeHtml(img)}" onclick="openModal(this.getAttribute('data-zoom'))" style="width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; cursor: pointer;" title="Bonyeza kukuza">`).join('') +
-          `</div>`;
-      }
-
-      const currentStatus = o.status || 'Pending';
-      let badgeStyle = 'background:#ffc107; color:#000;';
-      if (currentStatus === 'Dispatched') badgeStyle = 'background:#17a2b8; color:#fff;';
-      if (currentStatus === 'Completed') badgeStyle = 'background:#28a745; color:#fff;';
-
-      return `
-      <tr>
-        <td><strong>#${o.orderId}</strong></td>
-        <td>${photoHtml}</td>
-        <td>${escapeHtml(o.productName)}</td>
-        <td><strong>${escapeHtml(matchedWinga ? matchedWinga.name : 'Winga #' + o.wingaId)}</strong></td>
-        <td>TSh ${Number(o.sellingPrice || 0).toLocaleString()}</td>
-        <td>${escapeHtml(o.customerPhone || '-')}</td>
-        <td>${escapeHtml(o.location || '-')}</td>
-        <td><span style="padding: 3px 7px; border-radius: 12px; font-size: 10px; font-weight: bold; ${badgeStyle}">${escapeHtml(currentStatus)}</span></td>
-      </tr>`;
-    }).join('');
-
-    let superadminProductRows = products.map(p => {
-      const matchedWinga = wingas.find(w => Number(w.id) === Number(p.wingaId));
-      const images = getProductImages(p);
-      const mainImg = images[0] ? `<img src="${escapeHtml(images[0])}" data-zoom="${escapeHtml(images[0])}" onclick="openModal(this.getAttribute('data-zoom'))" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; cursor: pointer;" title="Bonyeza kukuza">` : '📦';
-      return `
-      <tr>
-        <td><strong>#${p.id}</strong></td>
-        <td>${mainImg}</td>
-        <td>${escapeHtml(p.name)}</td>
-        <td><strong>${escapeHtml(matchedWinga ? matchedWinga.name : 'Winga #' + p.wingaId)}</strong></td>
-        <td>TSh ${Number(p.sellingPrice || 0).toLocaleString()}</td>
-        <td>
-          <form action="/superadmin/product/delete" method="POST" onsubmit="return confirm('Futa bidhaa hii?');">
-            <input type="hidden" name="id" value="${p.id}">
-            <button type="submit" style="background:#dc3545; color:white; border:none; padding:5px 10px; border-radius:4px; font-size:11px; cursor:pointer;">🗑️ Delete</button>
-          </form>
-        </td>
-      </tr>`;
-    }).join('');
-
-    let superadminFeedbackRows = reviews.map(rev => {
-      const matchedOrder = orders.find(o => Number(o.orderId) === Number(rev.orderId));
-      const matchedWinga = matchedOrder ? wingas.find(w => Number(w.id) === Number(matchedOrder.wingaId)) : null;
-      return `<tr><td><strong>#${rev.orderId}</strong></td><td>${escapeHtml(matchedWinga ? matchedWinga.name : 'Unknown')}</td><td>${escapeHtml(matchedOrder ? matchedOrder.productName : 'N/A')}</td><td>${'⭐'.repeat(Math.max(1, Math.min(5, Number(rev.rating) || 5)))} (${rev.rating}/5)</td><td>"${escapeHtml(rev.comment)}"</td></tr>`;
-    }).join('');
+    let superadminFeedbackRows = reviews
+      .map(rev => {
+        const matchedOrder = orders.find(o => Number(o.orderId) === Number(rev.orderId));
+        const matchedWinga = matchedOrder
+          ? wingas.find(w => Number(w.id) === Number(matchedOrder.wingaId))
+          : null;
+        return `<tr><td><strong>#${rev.orderId}</strong></td><td>${escapeHtml(matchedWinga ? matchedWinga.name : 'Unknown')}</td><td>${escapeHtml(matchedOrder ? matchedOrder.productName : 'N/A')}</td><td>${'⭐'.repeat(Math.max(1, Math.min(5, Number(rev.rating) || 5)))} (${rev.rating}/5)</td><td>"${escapeHtml(rev.comment)}"</td></tr>`;
+      })
+      .join('');
 
     res.send(`
     <!DOCTYPE html>
@@ -3096,6 +3566,8 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     <body>
       <div class="container">
         <h1>👑 Platform Super Admin</h1>
+        <p style="font-size:12px;color:#555;margin-top:-8px;">Admins: <strong>0678143403</strong> & <strong>0745423403</strong></p>
+        ${statusNotice}
         <a href="/logout" style="background: #ec0c22; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block; margin-bottom: 15px;">🚪 Logout</a>
 
         <div class="stats-grid">
@@ -3133,7 +3605,7 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
         </div>
 
         <div class="card">
-          <h2>🏢 Wingas Directory</h2>
+          <h2>🏢 Wingas Directory (Status, SMS & Password Reset)</h2>
           <div class="table-responsive">
             <table>
               <thead><tr><th>ID</th><th>Name & Location</th><th>Phone</th><th>Status & SMS</th><th>Expires</th><th>Catalog</th><th>Orders</th><th>Profit</th><th>Actions</th></tr></thead>
@@ -3185,27 +3657,58 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
     </html>
     `);
   } catch (err) {
+    console.error('Superadmin view error:', err);
     res.status(500).send('Hitilafu kwenye Superadmin.');
   }
 });
 
+// Reset a seller's password from SuperAdmin
+app.post('/superadmin/winga/reset-password', requireSuperAdmin, async (req, res) => {
+  try {
+    const wingaId = parseInt(req.body.wingaId, 10);
+    const newPassword = (req.body.newPassword || '').trim();
+    if (!wingaId || newPassword.length < 6) {
+      return res.redirect('/superadmin?reset=short');
+    }
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await db('wingas').where({ id: wingaId }).update({ password: hashedPassword });
+    res.redirect('/superadmin?reset=success');
+  } catch (err) {
+    console.error('Superadmin reset password error:', err);
+    res.redirect('/superadmin');
+  }
+});
+
 app.post('/superadmin/product/delete', requireSuperAdmin, async (req, res) => {
-  try { await db('products').where({ id: parseInt(req.body.id, 10) }).del(); } catch (err) {}
+  try {
+    await db('products').where({ id: parseInt(req.body.id, 10) }).del();
+  } catch (err) {}
   res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/status', requireSuperAdmin, async (req, res) => {
-  try { await db('wingas').where({ id: parseInt(req.body.wingaId, 10) }).update({ status: req.body.status }); } catch (err) {}
+  try {
+    await db('wingas')
+      .where({ id: parseInt(req.body.wingaId, 10) })
+      .update({ status: req.body.status });
+  } catch (err) {}
   res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
   try {
-    const winga = await db('wingas').where({ id: parseInt(req.body.wingaId, 10) }).first();
+    const winga = await db('wingas')
+      .where({ id: parseInt(req.body.wingaId, 10) })
+      .first();
     if (winga) {
-      const baseDate = (winga.expiryDate && new Date(winga.expiryDate) > new Date()) ? new Date(winga.expiryDate) : new Date();
+      const baseDate =
+        winga.expiryDate && new Date(winga.expiryDate) > new Date()
+          ? new Date(winga.expiryDate)
+          : new Date();
       baseDate.setDate(baseDate.getDate() + 30);
-      await db('wingas').where({ id: parseInt(req.body.wingaId, 10) }).update({ expiryDate: baseDate, status: 'active' });
+      await db('wingas')
+        .where({ id: parseInt(req.body.wingaId, 10) })
+        .update({ expiryDate: baseDate, status: 'active' });
     }
   } catch (err) {}
   res.redirect('/superadmin');
@@ -3215,7 +3718,9 @@ app.post('/superadmin/winga/sms', requireSuperAdmin, async (req, res) => {
   try {
     const wingaId = parseInt(req.body.wingaId, 10);
     const smsEnabled = req.body.sms_enabled === '1';
-    if (!Number.isNaN(wingaId)) await db('wingas').where({ id: wingaId }).update({ sms_enabled: smsEnabled });
+    if (!Number.isNaN(wingaId)) {
+      await db('wingas').where({ id: wingaId }).update({ sms_enabled: smsEnabled });
+    }
   } catch (err) {}
   res.redirect('/superadmin');
 });
@@ -3225,7 +3730,14 @@ app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
     const name = (req.body.name || '').trim();
     const phone = (req.body.phone || '').trim();
     const rawPassword = (req.body.password || '123456').trim();
-    const fullLocation = buildLocationString(req.body.region, req.body.district, req.body.ward, req.body.street, req.body.customStreet) || 'Tanzania';
+    const fullLocation =
+      buildLocationString(
+        req.body.region,
+        req.body.district,
+        req.body.ward,
+        req.body.street,
+        req.body.customStreet
+      ) || 'Tanzania';
     if (!name || !phone) return res.redirect('/superadmin');
 
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
@@ -3247,25 +3759,37 @@ app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
   res.redirect('/superadmin');
 });
 
+// Daily 08:00 AM expiry & reminder cron
 cron.schedule('0 8 * * *', async () => {
   try {
     if (!isBotSocketReady()) return;
     const wingas = await db('wingas').select('*');
     const now = new Date();
-    for (let w of wingas) {
+    for (const w of wingas) {
       if (!w.expiryDate) continue;
       const expiry = new Date(w.expiryDate);
       const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-      const formattedPhone = w.phone.startsWith('0') ? '255' + w.phone.slice(1) : w.phone;
-      const chatId = formattedPhone + '@s.whatsapp.net';
+      const chatId = await resolveWhatsAppRecipientJid(w.phone);
+      if (!chatId) continue;
+
       if (daysLeft <= 0 && w.status === 'active') {
         await db('wingas').where({ id: w.id }).update({ status: 'suspended' });
-        try { await sock.sendMessage(chatId, { text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa siku 30 za matumizi umekwisha. Wasiliana na Admin WhatsApp kufanya malipo ili kufunguliwa tena.` }); } catch (e) {}
+        try {
+          await sock.sendMessage(chatId, {
+            text: `⚠️ *AKAUNTI IMESITISHWA*\n\nNdugu ${w.name}, muda wako wa siku 30 za matumizi umekwisha. Wasiliana na Admin WhatsApp kufanya malipo ili kufunguliwa tena.`
+          });
+        } catch (e) {}
       } else if (daysLeft === 3 && w.status === 'active') {
-        try { await sock.sendMessage(chatId, { text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako ya Winga Shop itasitishwa ndani ya siku 3. Wasiliana na Admin kuongeza siku.` }); } catch (e) {}
+        try {
+          await sock.sendMessage(chatId, {
+            text: `🔔 *KUMBUSHO LA MALIPO*\n\nNdugu ${w.name}, akaunti yako ya Winga Shop itasitishwa ndani ya siku 3. Wasiliana na Admin kuongeza siku.`
+          });
+        } catch (e) {}
       }
     }
-  } catch (err) { console.error('Cron error:', err); }
+  } catch (err) {
+    console.error('Cron error:', err);
+  }
 });
 
 app.listen(PORT, () => {
