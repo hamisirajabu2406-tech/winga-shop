@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
@@ -27,6 +27,8 @@ cloudinary.config({
 let sock = null;
 let isWhatsappReady = false;
 let isReconnecting = false;
+let lastConnectedAt = null;
+let lastDisconnectCode = null;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
@@ -151,7 +153,7 @@ app.get('/tz-locations.js', (req, res, next) => {
           "Chemba": { "Chemba": ["Chemba", "Farkwa", "Goima"] },
           "Kondoa": { "Kondoa Mjini": ["Kondoa", "Busi", "Kolo"] },
           "Kongwa": { "Kibaigwa": ["Kibaigwa", "Kongwa Mjini", "Sagala"] },
-          "Mpwapwa": { "Mpwapwa": ["Mpwapwa Mjini", "Kibakwe", "Godegode"] }
+          "Mpwapwa": { "Mpwapwa Mjini", "Kibakwe", "Godegode"] }
         },
         "Mwanza": {
           "Nyamagana": {
@@ -536,12 +538,21 @@ async function connectToWhatsApp() {
   try {
     const authDir = process.env.WA_AUTH_DIR || 'auth_info_baileys';
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    let version;
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      version = latest.version;
+    } catch (vErr) {
+      console.warn('⚠️ Could not fetch latest Baileys version, using default:', vErr.message);
+    }
 
     sock = makeWASocket({
+      ...(version ? { version } : {}),
       auth: state,
       printQRInTerminal: true,
       logger: pino({ level: 'silent' }),
-      browser: ['WingaShop', 'Chrome', '1.0.0']
+      browser: ['WingaShop', 'Chrome', '1.0.0'],
+      markOnlineOnConnect: false
     });
 
     sock.ev.on('connection.update', (update) => {
@@ -554,6 +565,7 @@ async function connectToWhatsApp() {
         isWhatsappReady = false;
         isReconnecting = false;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
+        lastDisconnectCode = statusCode || null;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.warn(`⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`);
         if (shouldReconnect) {
@@ -564,6 +576,7 @@ async function connectToWhatsApp() {
       } else if (connection === 'open') {
         isReconnecting = false;
         isWhatsappReady = true;
+        lastConnectedAt = new Date().toISOString();
         console.log('✅ Winga WhatsApp Bot (Baileys) is connected and live!');
       }
     });
@@ -878,6 +891,18 @@ async function notifyWinga(order, product) {
     console.error('❌ Failed to send alert to Winga:', err);
   }
 }
+
+// Bot status debug endpoint (helps verify live socket status)
+app.get('/bot-status', (req, res) => {
+  res.json({
+    ready: isBotSocketReady(),
+    isWhatsappReady,
+    isReconnecting,
+    hasUser: Boolean(sock && sock.user),
+    lastConnectedAt,
+    lastDisconnectCode
+  });
+});
 
 // Public Catalog Route with Details Modal, Customer Reviews, Multi-Color Selection & Cart
 app.get('/catalog', async (req, res) => {
@@ -2767,7 +2792,7 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
         if (phone.startsWith('0')) phone = '255' + phone.slice(1);
         if (phone) customerChatId = phone + '@s.whatsapp.net';
       }
-      if (customerChatId && isWhatsappReady && sock) {
+      if (customerChatId && isBotSocketReady()) {
         const trackUrl = `${PUBLIC_URL}/track?id=${order.orderId}`;
         let statusMessage = '';
         if (status === 'Dispatched') {
@@ -2825,6 +2850,7 @@ app.post('/forgot-password', rateLimitAuth(5, 15 * 60 * 1000), async (req, res) 
         `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
         `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
         `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code ikiwa inaonekana) na subiri sekunde 15–30 kisha ujaribu tena.</p>` +
+        `<p style="font-size:12px;color:#777;">Status: ready=${isBotSocketReady()}, reconnecting=${isReconnecting}, lastCode=${lastDisconnectCode || 'none'}</p>` +
         `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
         `</div>`
       );
@@ -3223,7 +3249,7 @@ app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
 
 cron.schedule('0 8 * * *', async () => {
   try {
-    if (!isWhatsappReady || !sock) return;
+    if (!isBotSocketReady()) return;
     const wingas = await db('wingas').select('*');
     const now = new Date();
     for (let w of wingas) {
