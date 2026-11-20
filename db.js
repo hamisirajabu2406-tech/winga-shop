@@ -7,12 +7,18 @@ const knex = require('knex')({
     user: process.env.DB_USER || 'avnadmin',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'defaultdb',
-    port: process.env.DB_PORT || 25801,
-    ssl: { rejectUnauthorized: false }
+    port: Number(process.env.DB_PORT || 25801),
+    ssl: { rejectUnauthorized: false },
+    connectTimeout: 20000
   },
-  pool: { min: 2, max: 10 }
+  pool: {
+    min: 0,
+    max: 6,
+    acquireTimeoutMillis: 25000,
+    idleTimeoutMillis: 30000,
+    reapIntervalMillis: 1000
+  }
 });
-
 async function initDb() {
   try {
     if (!await knex.schema.hasTable('wingas')) {
