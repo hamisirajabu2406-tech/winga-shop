@@ -58,6 +58,10 @@ function rateLimitAuth(maxAttempts = 6, windowMs = 15 * 60 * 1000) {
   };
 }
 
+function isSmsEnabled(val) {
+  return val === true || val === 1 || String(val).toLowerCase() === 'true' || String(val) === '1';
+}
+
 function maskPhone(phone) {
   const clean = String(phone || '').replace(/\D/g, '');
   if (clean.length < 7) return clean || '-';
@@ -581,7 +585,7 @@ async function connectToWhatsApp() {
         continue;
       }
 
-      if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
+        if (lowerText.startsWith('!agiza') || lowerText.startsWith('!order')) {
         let location = 'Haikutajwa';
         let phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
         let notes = '';
@@ -591,60 +595,93 @@ async function connectToWhatsApp() {
         const firstLine = lines[0] || '';
         const afterCommand = firstLine.replace(/^!(agiza|order)\s*/i, '').trim();
 
-        if (afterCommand.includes('|') && !afterCommand.toUpperCase().startsWith('ITEM')) {
-          const payload = afterCommand.split('|');
-          const pid = parseInt(payload[0].trim(), 10);
-          if (!isNaN(pid)) orderItems.push({ id: pid, size: 'Standard', color: 'Kama pichani', qty: 1 });
-          if (payload[1]) location = payload[1].trim();
-          if (payload[2]) phone = payload[2].trim();
-        } else {
-          const idMatches = afterCommand.match(/\d+/g) || [];
-          const directIds = idMatches.map(x => parseInt(x, 10)).filter(n => !isNaN(n) && n > 0);
-          let defaultSize = 'Standard';
-          let defaultColor = 'Kama pichani';
-          let defaultQty = 1;
+        let defaultSize = 'Standard';
+        let defaultColor = 'Kama pichani';
+        let defaultQty = 1;
 
-          for (const line of lines.slice(1)) {
-            const lower = line.toLowerCase();
-            if (lower.includes('simu:')) {
-              const val = line.split(/simu:/i)[1].trim();
-              if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
-            } else if (lower.includes('eneo:')) {
-              const val = line.split(/eneo:/i)[1].trim();
-              if (val && val.toLowerCase() !== 'haikutajwa') location = val;
-            } else if (lower.includes('maelezo:')) {
-              const val = line.split(/maelezo:/i)[1].trim();
-              if (val && val.toLowerCase() !== 'hakuna') notes = val;
-            } else if (lower.includes('saizi:') || lower.includes('size:')) {
-              defaultSize = line.split(/saizi:|size:/i)[1].trim() || 'Standard';
-            } else if (lower.includes('rangi:') || lower.includes('color:')) {
-              defaultColor = line.split(/rangi:|color:/i)[1].trim() || 'Kama pichani';
-            } else if (lower.includes('idadi:')) {
-              const q = parseInt(line.split(/idadi:/i)[1].trim(), 10);
-              if (!isNaN(q) && q > 0) defaultQty = q;
-            } else if (/^item\s*\d*\s*:/i.test(line)) {
-              const itemBody = line.replace(/^item\s*\d*\s*:/i, '').trim();
-              const segs = itemBody.split('|').map(s => s.trim());
-              const idMatch = segs[0].match(/#?(\d+)/);
-              if (idMatch) {
-                let itSize = 'Standard', itColor = 'Kama pichani', itQty = 1;
-                segs.slice(1).forEach(s => {
-                  if (/^(size|saizi):/i.test(s)) itSize = s.split(':')[1].trim() || 'Standard';
-                  if (/^(rangi|color):/i.test(s)) itColor = s.split(':')[1].trim() || 'Kama pichani';
-                  if (/^idadi:/i.test(s)) {
-                    const q = parseInt(s.split(':')[1].trim(), 10);
-                    if (!isNaN(q) && q > 0) itQty = q;
-                  }
-                });
-                orderItems.push({ id: parseInt(idMatch[1], 10), size: itSize, color: itColor, qty: itQty });
-              }
+        for (const line of lines.slice(1)) {
+          const lower = line.toLowerCase();
+          if (lower.includes('simu:')) {
+            const val = line.replace(/^.*?simu:\s*/i, '').trim();
+            if (val && val.toLowerCase() !== 'haikutajwa') phone = val;
+          } else if (lower.includes('eneo:')) {
+            const val = line.replace(/^.*?eneo:\s*/i, '').trim();
+            if (val && val.toLowerCase() !== 'haikutajwa') location = val;
+          } else if (lower.includes('maelezo:')) {
+            const val = line.replace(/^.*?maelezo:\s*/i, '').trim();
+            if (val && val.toLowerCase() !== 'hakuna') notes = val;
+          } else if (lower.includes('saizi:') || lower.includes('size:')) {
+            const val = line.replace(/^.*?(saizi|size):\s*/i, '').trim();
+            if (val) defaultSize = val;
+          } else if (lower.includes('rangi:') || lower.includes('color:')) {
+            const val = line.replace(/^.*?(rangi|color):\s*/i, '').trim();
+            if (val && val.toLowerCase() !== 'haijatajwa') defaultColor = val;
+          } else if (lower.includes('idadi:')) {
+            const q = parseInt(line.replace(/^.*?idadi:\s*/i, '').trim(), 10);
+            if (!isNaN(q) && q > 0) defaultQty = q;
+          } else if (/^item\s*\d*\s*:/i.test(line)) {
+            const itemBody = line.replace(/^item\s*\d*\s*:/i, '').trim();
+            const segs = itemBody.split('|').map(s => s.trim());
+            const idMatch = segs[0].match(/#?(\d+)/);
+            if (idMatch) {
+              let itSize = defaultSize, itColor = defaultColor, itQty = defaultQty;
+              segs.slice(1).forEach(s => {
+                if (/^(size|saizi):/i.test(s)) {
+                  itSize = s.replace(/^(size|saizi):\s*/i, '').trim() || 'Standard';
+                }
+                if (/^(rangi|color):/i.test(s)) {
+                  itColor = s.replace(/^(rangi|color):\s*/i, '').trim() || 'Kama pichani';
+                }
+                if (/^idadi:/i.test(s)) {
+                  const q = parseInt(s.replace(/^idadi:\s*/i, '').trim(), 10);
+                  if (!isNaN(q) && q > 0) itQty = q;
+                }
+              });
+              orderItems.push({ id: parseInt(idMatch[1], 10), size: itSize, color: itColor, qty: itQty });
             }
           }
+        }
 
-          if (orderItems.length === 0 && directIds.length > 0) {
-            directIds.forEach(id => {
-              orderItems.push({ id, size: defaultSize, color: defaultColor, qty: defaultQty });
-            });
+        if (orderItems.length === 0 && afterCommand) {
+          if (afterCommand.includes('|')) {
+            const payload = afterCommand.split('|');
+            const pidMatch = payload[0].match(/#?(\d+)/);
+            if (pidMatch) {
+              orderItems.push({
+                id: parseInt(pidMatch[1], 10),
+                size: defaultSize,
+                color: defaultColor,
+                qty: defaultQty
+              });
+            }
+            if (payload[1]) location = payload[1].trim();
+            if (payload[2]) phone = payload[2].trim();
+          } else {
+            // Chukua ID za bidhaa zilizotenganishwa kwa koma (mfano: "5" au "5, 6"), bila kuchukua namba ya simu
+            const commaParts = afterCommand.split(',');
+            for (const part of commaParts) {
+              const m = part.trim().match(/^#?(\d+)$/);
+              if (m) {
+                orderItems.push({
+                  id: parseInt(m[1], 10),
+                  size: defaultSize,
+                  color: defaultColor,
+                  qty: defaultQty
+                });
+              }
+            }
+            // Ikiwa hakukuwa na koma, chukua namba ya kwanza ya bidhaa baada ya !agiza
+            if (orderItems.length === 0) {
+              const firstNumMatch = afterCommand.match(/#?(\d+)/);
+              if (firstNumMatch) {
+                orderItems.push({
+                  id: parseInt(firstNumMatch[1], 10),
+                  size: defaultSize,
+                  color: defaultColor,
+                  qty: defaultQty
+                });
+              }
+            }
           }
         }
 
@@ -700,7 +737,7 @@ async function connectToWhatsApp() {
           await notifyWinga(newOrder, product);
 
           const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
-          if (orderWinga && Boolean(orderWinga.sms_enabled) && orderWinga.phone) {
+          if (orderWinga && isSmsEnabled(orderWinga.sms_enabled) && orderWinga.phone) {
             sendSellerOrderSms({
               phone: orderWinga.phone,
               sellerName: orderWinga.name,
