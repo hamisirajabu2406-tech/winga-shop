@@ -4,14 +4,12 @@ const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const session = require('express-session');
-const orderRoutes = require('./routes/orderRoutes');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('cloudinary').v2;
-const { sendSellerOrderSms } = require('./services/smsService');
 const db = require('./db');
 
 const app = express();
@@ -41,7 +39,6 @@ if (process.env.NODE_ENV === 'production') {
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
 
 // Landing Page with Contact Us & About Us
 app.get(['/', '/index.html'], (req, res) => {
@@ -101,9 +98,6 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
-
-app.use('/api', orderRoutes);
-
 
 // Multer Memory Storage Configuration
 const upload = multer({
@@ -335,20 +329,6 @@ async function connectToWhatsApp() {
                 `📍 *Fuatilia Oda Yako Hapa (Weka namba yako ya simu kuhakiki):*\n${trackUrl}`
         });
         await notifyWinga(newOrder, product);
-
-        // Tuma SMS kupitia Beem (Sender ID: MAPINDA) ikiwa winga ameruhusiwa (sms_enabled = true)
-        const orderWinga = await db('wingas').where({ id: newOrder.wingaId }).first();
-        if (orderWinga && Boolean(orderWinga.sms_enabled) && orderWinga.phone) {
-          sendSellerOrderSms({
-            phone: orderWinga.phone,
-            sellerName: orderWinga.name,
-            orderId: newOrder.orderId,
-            totalAmount: newOrder.sellingPrice,
-          }).catch((err) => {
-            console.error('[SMS Hook] Imeshindwa kutuma SMS kwa winga:', err);
-          });
-        }
-
         continue;
       }
 
@@ -2412,18 +2392,12 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
           completedOrders++;
         }
       });
-      
       const wingaProfit = wingaRevenue - wingaCost;
       platformTotalProfit += wingaProfit;
       platformTotalRevenue += wingaRevenue;
-
       const statusBadge = w.status === 'active'
         ? `<span style="background:#28a745; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Active</span>`
         : `<span style="background:#dc3545; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">Suspended</span>`;
-        const isSmsOn = Boolean(w.sms_enabled);
-      const smsBadge = isSmsOn
-        ? `<span style="background:#0ea5e9; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: ON</span>`
-        : `<span style="background:#6c757d; color:white; padding:3px 7px; border-radius:12px; font-size:10px; font-weight:bold;">SMS: OFF</span>`;
       const expiryFormatted = w.expiryDate ? new Date(w.expiryDate).toLocaleDateString() : 'N/A';
       return `
       <tr>
@@ -2451,13 +2425,6 @@ app.get('/superadmin', requireSuperAdmin, async (req, res) => {
             <form action="/superadmin/winga/extend" method="POST" style="display:inline;">
               <input type="hidden" name="wingaId" value="${w.id}">
               <button type="submit" style="background:#007bff; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">+30 Days</button>
-            </form>
-            <form action="/superadmin/winga/sms" method="POST" style="display:inline;">
-              <input type="hidden" name="wingaId" value="${w.id}">
-              <input type="hidden" name="sms_enabled" value="${isSmsOn ? '0' : '1'}">
-              <button type="submit" style="background:${isSmsOn ? '#6c757d' : '#0ea5e9'}; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">
-                ${isSmsOn ? 'Disable SMS' : 'Enable SMS'}
-              </button>
             </form>
           </div>
         </td>
@@ -2624,19 +2591,6 @@ app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
       await db('wingas').where({ id: parseInt(req.body.wingaId) }).update({ expiryDate: baseDate, status: 'active' });
     }
   } catch (err) {}
-  res.redirect('/superadmin');
-});
-
-app.post('/superadmin/winga/sms', requireSuperAdmin, async (req, res) => {
-  try {
-    const wingaId = parseInt(req.body.wingaId, 10);
-    const smsEnabled = req.body.sms_enabled === '1' || req.body.sms_enabled === 'true' || req.body.sms_enabled === true;
-    if (!Number.isNaN(wingaId)) {
-      await db('wingas').where({ id: wingaId }).update({ sms_enabled: smsEnabled });
-    }
-  } catch (err) {
-    console.error('Error updating winga SMS setting:', err);
-  }
   res.redirect('/superadmin');
 });
 
