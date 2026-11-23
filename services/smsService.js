@@ -47,6 +47,8 @@ async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
     ],
   };
 
+  console.log(`[SMS] Inatuma SMS kwenda ${destAddr} (Order #${orderId}, Sender: ${senderId})...`);
+
   try {
     const res = await axios.post(BEEM_SMS_URL, payload, {
       headers: {
@@ -55,10 +57,22 @@ async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
       },
       timeout: 10000,
     });
+    console.log('[SMS] Jibu la Beem:', JSON.stringify(res.data));
     return { ok: true, data: res.data };
   } catch (err) {
-    console.error('[SMS] Imeshindwa kutuma kupitia Beem:', err.message);
-    return { ok: false, reason: 'api_error' };
+    const status = err.response?.status;
+    const providerData = err.response?.data;
+    console.error(
+      `[SMS] Imeshindwa kutuma kupitia Beem (status: ${status || 'N/A'}):`,
+      providerData ? JSON.stringify(providerData) : err.message
+    );
+    return {
+      ok: false,
+      reason: 'api_error',
+      status,
+      providerData,
+      error: err.message,
+    };
   }
 }
 
