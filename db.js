@@ -19,9 +19,10 @@ const knex = require('knex')({
     reapIntervalMillis: 1000
   }
 });
+
 async function initDb() {
   try {
-    if (!await knex.schema.hasTable('wingas')) {
+    if (!(await knex.schema.hasTable('wingas'))) {
       await knex.schema.createTable('wingas', (table) => {
         table.increments('id').primary();
         table.string('name').notNullable();
@@ -34,19 +35,19 @@ async function initDb() {
         table.timestamp('dateAdded').defaultTo(knex.fn.now());
       });
     } else {
-      if (!await knex.schema.hasColumn('wingas', 'location')) {
+      if (!(await knex.schema.hasColumn('wingas', 'location'))) {
         await knex.schema.alterTable('wingas', (table) => {
           table.string('location', 255).defaultTo('Tanzania');
         });
       }
-      if (!await knex.schema.hasColumn('wingas', 'sms_enabled')) {
+      if (!(await knex.schema.hasColumn('wingas', 'sms_enabled'))) {
         await knex.schema.alterTable('wingas', (table) => {
           table.boolean('sms_enabled').notNullable().defaultTo(false);
         });
       }
     }
 
-    if (!await knex.schema.hasTable('products')) {
+    if (!(await knex.schema.hasTable('products'))) {
       await knex.schema.createTable('products', (table) => {
         table.increments('id').primary();
         table.integer('wingaId').unsigned().notNullable();
@@ -63,14 +64,14 @@ async function initDb() {
         table.foreign('wingaId').references('wingas.id').onDelete('CASCADE');
       });
     } else {
-      if (!await knex.schema.hasColumn('products', 'colors')) {
+      if (!(await knex.schema.hasColumn('products', 'colors'))) {
         await knex.schema.alterTable('products', (table) => {
           table.string('colors', 255).defaultTo('Kama pichani');
         });
       }
     }
 
-    if (!await knex.schema.hasTable('orders')) {
+    if (!(await knex.schema.hasTable('orders'))) {
       await knex.schema.createTable('orders', (table) => {
         table.increments('id').primary();
         table.integer('orderId').notNullable();
@@ -87,14 +88,14 @@ async function initDb() {
         table.foreign('wingaId').references('wingas.id').onDelete('CASCADE');
       });
     } else {
-      if (!await knex.schema.hasColumn('orders', 'productId')) {
+      if (!(await knex.schema.hasColumn('orders', 'productId'))) {
         await knex.schema.alterTable('orders', (table) => {
           table.integer('productId').unsigned().nullable();
         });
       }
     }
 
-    if (!await knex.schema.hasTable('reviews')) {
+    if (!(await knex.schema.hasTable('reviews'))) {
       await knex.schema.createTable('reviews', (table) => {
         table.increments('id').primary();
         table.integer('orderId').notNullable().unique();
@@ -104,7 +105,7 @@ async function initDb() {
       });
     }
 
-    if (!await knex.schema.hasTable('stats')) {
+    if (!(await knex.schema.hasTable('stats'))) {
       await knex.schema.createTable('stats', (table) => {
         table.string('key', 50).primary();
         table.integer('value').defaultTo(0);
@@ -112,7 +113,7 @@ async function initDb() {
       await knex('stats').insert({ key: 'catalogVisits', value: 0 }).onConflict('key').ignore();
     }
 
-    if (!await knex.schema.hasTable('password_resets')) {
+    if (!(await knex.schema.hasTable('password_resets'))) {
       await knex.schema.createTable('password_resets', (table) => {
         table.increments('id').primary();
         table.string('phone', 50).notNullable();
@@ -128,6 +129,8 @@ async function initDb() {
   }
 }
 
-knex.raw('SELECT 1').then(() => initDb());
+knex.raw('SELECT 1').then(() => initDb()).catch((err) => {
+  console.error('❌ Initial DB connection check failed:', err.message);
+});
 
 module.exports = knex;

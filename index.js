@@ -7,6 +7,7 @@ const {
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const axios = require('axios');
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
@@ -17,7 +18,6 @@ const bcrypt = require('bcryptjs');
 const cloudinary = require('cloudinary').v2;
 const db = require('./db');
 
-// Optional modules (loaded safely if present)
 let orderRoutes = null;
 try {
   orderRoutes = require('./routes/orderRoutes');
@@ -34,14 +34,13 @@ try {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_URL = (
   process.env.BASE_URL ||
   process.env.RENDER_EXTERNAL_URL ||
   'https://winga-shop.onrender.com'
 ).replace(/\/$/, '');
 
-// Configure Cloudinary if credentials exist
 if (
   process.env.CLOUDINARY_CLOUD_NAME &&
   process.env.CLOUDINARY_API_KEY &&
@@ -54,17 +53,17 @@ if (
   });
 }
 
-// Global WhatsApp & System State
 let sock = null;
 let isWhatsappReady = false;
 let isReconnecting = false;
 let lastConnectedAt = null;
 let lastDisconnectCode = null;
 let reconnectTimer = null;
+let pairingCodeRequestedForSocket = false;
+let latestPairingCode = null;
 const shopBroadcastCooldown = new Map();
 const authAttempts = new Map();
 
-// SuperAdmin credentials
 const SUPER_ADMINS = [
   {
     phone: (process.env.SUPERADMIN_PHONE_1 || '0678143403').trim(),
@@ -81,7 +80,9 @@ function normalizePhone(raw) {
   if (!digits) return '';
   if (digits.startsWith('255') && digits.length >= 12) return digits;
   if (digits.startsWith('0') && digits.length === 10) return '255' + digits.slice(1);
-  if (digits.length === 9) return '255' + digits;
+  if ((digits.startsWith('6') || digits.startsWith('7')) && digits.length === 9) {
+    return '255' + digits;
+  }
   return digits;
 }
 
@@ -156,7 +157,24 @@ function maskPhone(phone) {
 }
 
 function isHttpUrl(str) {
-  return typeof str === 'string' && /^https?:\/\//i.test(str.trim());
+  if (typeof str !== 'string') return false;
+  try {
+    const u = new URL(str.trim());
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch (e) {
+    return false;
+  }
+}
+
+function safeParseJson(raw, fallback = []) {
+  if (!raw) return fallback;
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return parsed;
+  } catch (e) {
+    return fallback;
+  }
 }
 
 if (process.env.NODE_ENV === 'production') {
@@ -171,9 +189,10 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
+app.disable('x-powered-by');
 app.set('trust proxy', 1);
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 // Dynamic TZ location dataset helper
 app.get('/tz-locations.js', (req, res, next) => {
@@ -464,6 +483,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(
   session({
+    name: 'winga.sid',
     secret: process.env.SESSION_SECRET || 'winga-super-secret-key',
     resave: false,
     saveUninitialized: false,
@@ -480,7 +500,6 @@ if (orderRoutes) {
   app.use('/api', orderRoutes);
 }
 
-// Multer Memory Upload for Product Images (up to 4 images)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -550,16 +569,8 @@ function requireSuperAdmin(req, res, next) {
 
 function getProductImages(product) {
   if (!product) return [];
-  let raw = product.imageUrl;
-  if (!raw) return [];
-  let list = [];
-  try {
-    const parsed =
-      typeof raw === 'string' && raw.trim().startsWith('[') ? JSON.parse(raw) : raw;
-    list = Array.isArray(parsed) ? parsed : [parsed];
-  } catch (e) {
-    list = [raw];
-  }
+  const parsed = safeParseJson(product.imageUrl, product.imageUrl);
+  const list = Array.isArray(parsed) ? parsed : [parsed];
   return list.map(img => (img ? String(img).trim() : '')).filter(Boolean);
 }
 
@@ -658,13 +669,66 @@ function isBotSocketReady() {
   return Boolean(sock && (isWhatsappReady || sock.user));
 }
 
-function buildDirectJid(phoneOrJid) {
+function buildFallbackJid(phoneOrJid) {
   if (!phoneOrJid) return null;
   const raw = String(phoneOrJid).trim();
   if (raw.includes('@')) return raw;
   const intl = normalizePhone(raw);
   if (!intl) return null;
   return `${intl}@s.whatsapp.net`;
+}
+
+async function resolveWhatsappJid(phoneOrJid) {
+  const fallback = buildFallbackJid(phoneOrJid);
+  if (!fallback) return null;
+  if (fallback.endsWith('@lid')) return fallback;
+
+  const digits = fallback.split('@')[0].replace(/\D/g, '');
+  if (!digits || !sock || typeof sock.onWhatsApp !== 'function') {
+    return fallback;
+  }
+
+  try {
+    const results = await sock.onWhatsApp(digits);
+    const match = Array.isArray(results)
+      ? results.find(r => r && r.exists && r.jid)
+      : null;
+    if (match && match.jid) {
+      return match.jid;
+    }
+  } catch (err) {
+    console.warn(`[WA] onWhatsApp check failed for ${digits}:`, err.message);
+  }
+  return fallback;
+}
+
+async function sendImageWithFallback(jid, imageUrl, caption) {
+  if (isHttpUrl(imageUrl)) {
+    try {
+      return await sock.sendMessage(jid, {
+        image: { url: imageUrl },
+        caption
+      });
+    } catch (urlErr) {
+      console.warn(`[WA] Direct URL image send failed for ${jid}, trying buffer download:`, urlErr.message);
+      try {
+        const resp = await axios.get(imageUrl, {
+          responseType: 'arraybuffer',
+          timeout: 12000
+        });
+        const buf = Buffer.from(resp.data);
+        if (buf.length > 0) {
+          return await sock.sendMessage(jid, {
+            image: buf,
+            caption
+          });
+        }
+      } catch (bufErr) {
+        console.warn(`[WA] Buffer image fallback failed for ${jid}, sending text:`, bufErr.message);
+      }
+    }
+  }
+  return await sock.sendMessage(jid, { text: caption });
 }
 
 function scheduleReconnect(delayMs = 4000) {
@@ -678,6 +742,7 @@ function scheduleReconnect(delayMs = 4000) {
 async function connectToWhatsApp() {
   if (isReconnecting) return;
   isReconnecting = true;
+  pairingCodeRequestedForSocket = false;
 
   try {
     const authDir = process.env.WA_AUTH_DIR || path.join(__dirname, 'auth_info_baileys');
@@ -718,25 +783,68 @@ async function connectToWhatsApp() {
       } catch (e) {}
     }
 
+    const usePairingCode =
+      String(process.env.USE_PAIRING_CODE || 'true').toLowerCase() !== 'false';
+    const rawBotPhone = normalizePhone(process.env.BOT_PHONE_NUMBER || '');
+
     sock = makeWASocket({
       ...(version ? { version } : {}),
       auth: state,
-      printQRInTerminal: true,
+      printQRInTerminal: false,
       logger: pino({ level: 'silent' }),
-      browser: ['WingaShop', 'Chrome', '1.0.0'],
+      browser: ['Ubuntu', 'Chrome', '22.04.4'],
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
       markOnlineOnConnect: false
     });
 
-    sock.ev.on('connection.update', update => {
+    const triggerPairingIfNeeded = async () => {
+      if (
+        usePairingCode &&
+        rawBotPhone &&
+        sock &&
+        !sock.authState?.creds?.registered &&
+        !pairingCodeRequestedForSocket &&
+        typeof sock.requestPairingCode === 'function'
+      ) {
+        pairingCodeRequestedForSocket = true;
+        try {
+          await new Promise(r => setTimeout(r, 1500));
+          const code = await sock.requestPairingCode(rawBotPhone);
+          latestPairingCode = code;
+          console.log('====================================================');
+          console.log(`🔑 WHATSAPP PAIRING CODE (${rawBotPhone}): ${code}`);
+          console.log('Fungua WhatsApp -> Linked Devices -> Link with phone number');
+          console.log('====================================================');
+        } catch (pairErr) {
+          pairingCodeRequestedForSocket = false;
+          console.error('❌ Imeshindwa kupata pairing code:', pairErr.message);
+        }
+      }
+    };
+
+    if (usePairingCode && rawBotPhone && !state.creds.registered) {
+      triggerPairingIfNeeded();
+    }
+
+    sock.ev.on('connection.update', async update => {
       const { connection, lastDisconnect, qr } = update;
+
       if (qr) {
         isReconnecting = false;
-        console.log('⚡ Scan this QR Code with WhatsApp:');
-        qrcode.generate(qr, { small: true });
+        if (usePairingCode && rawBotPhone && !sock.authState?.creds?.registered) {
+          await triggerPairingIfNeeded();
+        } else {
+          console.log('⚡ Scan this QR Code with WhatsApp:');
+          qrcode.generate(qr, { small: true });
+        }
       }
+
+      if (connection === 'connecting' && usePairingCode && rawBotPhone && !sock.authState?.creds?.registered) {
+        await triggerPairingIfNeeded();
+      }
+
       if (connection === 'close') {
         isWhatsappReady = false;
         isReconnecting = false;
@@ -747,16 +855,17 @@ async function connectToWhatsApp() {
           `⚠️ WhatsApp connection closed (code: ${statusCode || 'unknown'}), reconnecting: ${shouldReconnect}`
         );
         if (shouldReconnect) {
-          const retryDelay = statusCode === 408 ? 6000 : 3500;
+          const retryDelay = statusCode === 408 ? 5000 : 3500;
           scheduleReconnect(retryDelay);
         } else {
           console.error(
-            '❌ WhatsApp session logged out. Clear auth folder and scan QR again.'
+            '❌ WhatsApp session logged out. Clear auth folder and pair again.'
           );
         }
       } else if (connection === 'open') {
         isReconnecting = false;
         isWhatsappReady = true;
+        latestPairingCode = null;
         lastDisconnectCode = null;
         lastConnectedAt = new Date().toISOString();
         console.log('✅ Winga WhatsApp Bot (Baileys) is connected and live!');
@@ -783,7 +892,6 @@ async function connectToWhatsApp() {
         if (!text) continue;
         const lowerText = text.toLowerCase();
 
-        // Ignore bot's own automated replies to prevent infinite loops
         if (
           msg.key.fromMe &&
           (lowerText.startsWith('🛒 *oda yako imepokelewa!*') ||
@@ -1154,19 +1262,12 @@ async function notifyShopCustomers(winga, newProduct) {
 
     for (const jid of customerJids) {
       try {
-        if (newProduct && images.length > 0 && isHttpUrl(images[0])) {
-          try {
-            await sock.sendMessage(jid, { image: { url: images[0] }, caption: alertMsg });
-            console.log(`[NOTIFY][BROADCAST] Picha + ujumbe vimetumwa kwenda ${jid}`);
-          } catch (imgErr) {
-            console.warn(`[NOTIFY][BROADCAST] Picha imeshindwa kwa ${jid}, inatuma text:`, imgErr.message);
-            await sock.sendMessage(jid, { text: alertMsg });
-            console.log(`[NOTIFY][BROADCAST] Text fallback imetumwa kwenda ${jid}`);
-          }
+        if (newProduct && images.length > 0) {
+          await sendImageWithFallback(jid, images[0], alertMsg);
         } else {
           await sock.sendMessage(jid, { text: alertMsg });
-          console.log(`[NOTIFY][BROADCAST] Text imetumwa kwenda ${jid}`);
         }
+        console.log(`[NOTIFY][BROADCAST] Imefanikiwa kwenda ${jid}`);
       } catch (sendErr) {
         console.error(`[NOTIFY][BROADCAST] Imeshindwa kutuma kwenda ${jid}:`, sendErr.message);
       }
@@ -1187,7 +1288,7 @@ async function notifyWinga(order, product) {
       console.warn(`[NOTIFY][WINGA] Winga #${order.wingaId} hana namba ya simu kwa Oda #${order.orderId}`);
       return;
     }
-    const wingaChatId = buildDirectJid(winga.phone);
+    const wingaChatId = await resolveWhatsappJid(winga.phone);
     if (!wingaChatId) {
       console.warn(`[NOTIFY][WINGA] JID batili kwa simu ${winga.phone} (Oda #${order.orderId})`);
       return;
@@ -1205,24 +1306,14 @@ async function notifyWinga(order, product) {
       `📲 Angalia dashboard yako hapa: ${PUBLIC_URL}/admin`;
 
     const images = getProductImages(product);
-    if (images.length > 0 && isHttpUrl(images[0])) {
-      try {
-        await sock.sendMessage(wingaChatId, {
-          image: { url: images[0] },
-          caption: alertMessage
-        });
-        console.log(`[NOTIFY][WINGA] Oda #${order.orderId} imetumwa (picha + caption) kwenda ${wingaChatId}`);
-      } catch (imgErr) {
-        console.warn('[NOTIFY][WINGA] Image alert failed, sending text fallback:', imgErr.message);
-        await sock.sendMessage(wingaChatId, { text: alertMessage });
-        console.log(`[NOTIFY][WINGA] Oda #${order.orderId} imetumwa (text fallback) kwenda ${wingaChatId}`);
-      }
+    if (images.length > 0) {
+      await sendImageWithFallback(wingaChatId, images[0], alertMessage);
     } else {
       await sock.sendMessage(wingaChatId, { text: alertMessage });
-      console.log(`[NOTIFY][WINGA] Oda #${order.orderId} imetumwa (text) kwenda ${wingaChatId}`);
     }
+    console.log(`[NOTIFY][WINGA] Oda #${order.orderId} imetumwa kwenda ${wingaChatId}`);
   } catch (err) {
-    console.error('❌ Failed to send alert to Winga:', err);
+    console.error('❌ Failed to send alert to Winga:', err.message || err);
   }
 }
 
@@ -1236,6 +1327,7 @@ app.get('/bot-status', (req, res) => {
     isWhatsappReady,
     isReconnecting,
     hasUser: Boolean(sock && sock.user),
+    pairingCode: latestPairingCode || null,
     lastConnectedAt,
     lastDisconnectCode
   });
@@ -1258,7 +1350,7 @@ app.get('/catalog', async (req, res) => {
     const shopId = req.query.shop ? parseInt(req.query.shop, 10) : null;
     let products = allProducts;
     let shopName = 'Soko Letu (All Shops)';
-    if (shopId) {
+    if (shopId && !Number.isNaN(shopId)) {
       products = allProducts.filter(p => Number(p.wingaId) === shopId);
       const matchedWinga = wingas.find(w => Number(w.id) === shopId);
       if (matchedWinga) {
@@ -1954,7 +2046,7 @@ app.get('/track', async (req, res) => {
     let shopId = req.query.shop ? parseInt(req.query.shop, 10) : null;
     let resultHtml = '';
 
-    if (searchId) {
+    if (searchId && !Number.isNaN(searchId)) {
       const order = await db('orders').where({ orderId: searchId }).first();
       if (order) {
         if (!shopId && order.wingaId) shopId = order.wingaId;
@@ -2090,7 +2182,8 @@ app.post('/track/verify', rateLimitAuth(10, 15 * 60 * 1000), async (req, res) =>
   try {
     const oid = parseInt(req.body.orderId, 10);
     const inputPhone = (req.body.phone || '').trim();
-    const shop = req.body.shop;
+    const shop = req.body.shop && /^\d+$/.test(String(req.body.shop)) ? String(req.body.shop) : '';
+    if (Number.isNaN(oid)) return res.redirect('/track');
     const order = await db('orders').where({ orderId: oid }).first();
     if (!order) return res.redirect('/track');
 
@@ -2110,8 +2203,8 @@ app.post('/track/verify', rateLimitAuth(10, 15 * 60 * 1000), async (req, res) =>
 app.get('/track/invoice', async (req, res) => {
   try {
     const orderId = parseInt(req.query.id, 10);
-    if (!orderId || !(req.session.verifiedOrders || {})[orderId]) {
-      return res.redirect(`/track?id=${orderId || ''}`);
+    if (!orderId || Number.isNaN(orderId) || !(req.session.verifiedOrders || {})[orderId]) {
+      return res.redirect(`/track?id=${Number.isNaN(orderId) ? '' : orderId}`);
     }
     const order = await db('orders').where({ orderId }).first();
     if (!order) return res.send('❌ Oda haipatikani.');
@@ -2128,11 +2221,11 @@ app.get('/track/invoice', async (req, res) => {
 app.post('/track/review', async (req, res) => {
   try {
     const oid = parseInt(req.body.orderId, 10);
-    if (!(req.session.verifiedOrders || {})[oid]) {
-      return res.redirect(`/track?id=${oid}`);
+    if (Number.isNaN(oid) || !(req.session.verifiedOrders || {})[oid]) {
+      return res.redirect(`/track?id=${Number.isNaN(oid) ? '' : oid}`);
     }
     const rating = Math.max(1, Math.min(5, parseInt(req.body.rating, 10) || 5));
-    const comment = (req.body.comment || '').trim();
+    const comment = (req.body.comment || '').trim().slice(0, 1000);
     if (!comment) return res.redirect(`/track?id=${oid}`);
 
     const existing = await db('reviews').where({ orderId: oid }).first();
@@ -2291,7 +2384,7 @@ app.get('/register', (req, res) => {
 
         <label>Weka Nenosiri (Password):</label>
         <div class="password-container">
-          <input type="password" name="password" id="regPassword" placeholder="••••••••" required>
+          <input type="password" name="password" id="regPassword" placeholder="••••••••" minlength="6" required>
           <button type="button" class="eye-btn" onclick="togglePassword('regPassword', this)">👁️</button>
         </div>
 
@@ -2323,7 +2416,7 @@ app.get('/register', (req, res) => {
 
 app.post('/register', async (req, res) => {
   try {
-    const name = (req.body.name || '').trim();
+    const name = (req.body.name || '').trim().slice(0, 120);
     const phone = (req.body.phone || '').trim();
     const fullLocation = buildLocationString(
       req.body.region,
@@ -2334,9 +2427,9 @@ app.post('/register', async (req, res) => {
     );
     const password = (req.body.password || '').trim();
 
-    if (!name || !phone || !fullLocation || !password) {
+    if (!name || !phone || !fullLocation || password.length < 6) {
       return res.send(
-        '❌ Tafadhali jaza taarifa zote na eneo kamili. <br><a href="/register">Jaribu Tena</a>'
+        '❌ Tafadhali jaza taarifa zote, eneo kamili, na nenosiri la angalau herufi 6. <br><a href="/register">Jaribu Tena</a>'
       );
     }
 
@@ -2370,12 +2463,13 @@ app.post('/register', async (req, res) => {
     `);
   } catch (err) {
     console.error('Registration error:', err);
-    res.status(500).send(`❌ Hitilafu ya Server: ${escapeHtml(err.message)}`);
+    res.status(500).send('❌ Hitilafu ya Server wakati wa kusajili.');
   }
 });
 
 app.all('/logout', (req, res) => {
   req.session.destroy(() => {
+    res.clearCookie('winga.sid');
     res.clearCookie('connect.sid');
     return res.redirect('/login');
   });
@@ -3111,6 +3205,7 @@ app.get('/admin', requireWinga, async (req, res) => {
 app.get('/admin/order/invoice', requireWinga, async (req, res) => {
   try {
     const orderId = parseInt(req.query.id, 10);
+    if (Number.isNaN(orderId)) return res.send('❌ Namba ya oda si sahihi.');
     const order = await db('orders')
       .where({ orderId, wingaId: req.session.wingaId })
       .first();
@@ -3151,15 +3246,18 @@ app.post('/admin/add', requireWinga, (req, res) => {
       const finalColorsStr =
         mergedColors.length > 0 ? mergedColors.join(', ') : 'Kama pichani';
 
+      const buyNum = Math.max(0, parseFloat(buyingPrice || 0) || 0);
+      const sellNum = Math.max(0, parseFloat(sellingPrice || 0) || 0);
+
       const newProductData = {
         wingaId: req.session.wingaId,
-        name: name.trim(),
-        category: category ? category.trim() : 'General',
-        buyingPrice: parseFloat(buyingPrice || 0),
-        sellingPrice: parseFloat(sellingPrice || 0),
-        price: parseFloat(sellingPrice || 0),
-        size: size ? size.trim() : 'Standard',
-        colors: finalColorsStr,
+        name: name.trim().slice(0, 180),
+        category: category ? category.trim().slice(0, 100) : 'General',
+        buyingPrice: buyNum,
+        sellingPrice: sellNum,
+        price: sellNum,
+        size: size ? size.trim().slice(0, 100) : 'Standard',
+        colors: finalColorsStr.slice(0, 250),
         imageUrl: JSON.stringify(imageUrls),
         dateAdded: new Date()
       };
@@ -3190,6 +3288,9 @@ app.post('/admin/product/edit', requireWinga, (req, res) => {
     }
     try {
       const prodId = parseInt(req.body.id, 10);
+      if (Number.isNaN(prodId)) {
+        return res.redirect('/admin?error=upload&reason=' + encodeURIComponent('ID batili'));
+      }
       const existing = await db('products')
         .where({ id: prodId, wingaId: req.session.wingaId })
         .first();
@@ -3211,26 +3312,23 @@ app.post('/admin/product/edit', requireWinga, (req, res) => {
       const finalColorsStr =
         mergedColors.length > 0 ? mergedColors.join(', ') : existing.colors || 'Kama pichani';
 
+      const buyNum =
+        buyingPrice !== undefined && buyingPrice !== ''
+          ? Math.max(0, parseFloat(buyingPrice) || 0)
+          : Number(existing.buyingPrice || 0);
+      const sellNum =
+        sellingPrice !== undefined && sellingPrice !== ''
+          ? Math.max(0, parseFloat(sellingPrice) || 0)
+          : Number(existing.sellingPrice || 0);
+
       const updatePayload = {
-        name: (name || existing.name).trim(),
-        category: (category || existing.category || 'General').trim(),
-        buyingPrice: parseFloat(
-          buyingPrice !== undefined && buyingPrice !== ''
-            ? buyingPrice
-            : existing.buyingPrice || 0
-        ),
-        sellingPrice: parseFloat(
-          sellingPrice !== undefined && sellingPrice !== ''
-            ? sellingPrice
-            : existing.sellingPrice || 0
-        ),
-        price: parseFloat(
-          sellingPrice !== undefined && sellingPrice !== ''
-            ? sellingPrice
-            : existing.price || 0
-        ),
-        size: (size || existing.size || 'Standard').trim(),
-        colors: finalColorsStr
+        name: (name || existing.name).trim().slice(0, 180),
+        category: (category || existing.category || 'General').trim().slice(0, 100),
+        buyingPrice: buyNum,
+        sellingPrice: sellNum,
+        price: sellNum,
+        size: (size || existing.size || 'Standard').trim().slice(0, 100),
+        colors: finalColorsStr.slice(0, 250)
       };
 
       if (req.files && req.files.length > 0) {
@@ -3254,9 +3352,12 @@ app.post('/admin/product/edit', requireWinga, (req, res) => {
 
 app.post('/admin/product/delete', requireWinga, async (req, res) => {
   try {
-    await db('products')
-      .where({ id: parseInt(req.body.id, 10), wingaId: req.session.wingaId })
-      .del();
+    const pid = parseInt(req.body.id, 10);
+    if (!Number.isNaN(pid)) {
+      await db('products')
+        .where({ id: pid, wingaId: req.session.wingaId })
+        .del();
+    }
   } catch (err) {
     console.error('Delete product error:', err);
   }
@@ -3266,7 +3367,12 @@ app.post('/admin/product/delete', requireWinga, async (req, res) => {
 app.post('/admin/order/status', requireWinga, async (req, res) => {
   try {
     const orderId = parseInt(req.body.orderId, 10);
-    const status = req.body.status;
+    const status = String(req.body.status || '').trim();
+    const allowedStatuses = ['Pending', 'Dispatched', 'Completed'];
+    if (Number.isNaN(orderId) || !allowedStatuses.includes(status)) {
+      return res.redirect('/admin');
+    }
+
     const order = await db('orders')
       .where({ orderId, wingaId: req.session.wingaId })
       .first();
@@ -3275,9 +3381,12 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
         .where({ orderId, wingaId: req.session.wingaId })
         .update({ status });
 
-      let customerChatId = order.senderJid;
-      if (!customerChatId || !String(customerChatId).includes('@')) {
-        customerChatId = buildDirectJid(order.customerPhone);
+      let customerChatId = null;
+      if (order.senderJid && String(order.senderJid).includes('@')) {
+        customerChatId = String(order.senderJid).trim();
+      }
+      if (!customerChatId && order.customerPhone) {
+        customerChatId = await resolveWhatsappJid(order.customerPhone);
       }
 
       if (customerChatId && isBotSocketReady()) {
@@ -3301,8 +3410,18 @@ app.post('/admin/order/status', requireWinga, async (req, res) => {
             `*!maoni ${order.orderId} [nyota 1-5] [maoni yako]*`;
         }
         if (statusMessage) {
-          await sock.sendMessage(customerChatId, { text: statusMessage });
-          console.log(`[NOTIFY][STATUS] Oda #${order.orderId} (${status}) imetumwa kwenda ${customerChatId}`);
+          try {
+            await sock.sendMessage(customerChatId, { text: statusMessage });
+            console.log(`[NOTIFY][STATUS] Oda #${order.orderId} (${status}) imetumwa kwenda ${customerChatId}`);
+          } catch (sendErr) {
+            const altJid = await resolveWhatsappJid(order.customerPhone);
+            if (altJid && altJid !== customerChatId) {
+              await sock.sendMessage(altJid, { text: statusMessage });
+              console.log(`[NOTIFY][STATUS] Oda #${order.orderId} (${status}) imetumwa (alt JID) kwenda ${altJid}`);
+            } else {
+              console.error(`[NOTIFY][STATUS] Imeshindwa kutuma Oda #${order.orderId} kwenda ${customerChatId}:`, sendErr.message);
+            }
+          }
         }
       } else {
         console.warn(`[NOTIFY][STATUS] Haikuweza kutuma Oda #${order.orderId} (jid=${customerChatId || 'none'}, ready=${isBotSocketReady()})`);
@@ -3367,7 +3486,7 @@ app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) 
         .send(
           `<div style="text-align:center;padding:35px;font-family:sans-serif;max-width:420px;margin:40px auto;background:#fff;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">` +
             `<h3 style="color:#dc3545;">⚠️ WhatsApp Bot Haijaunganishwa / Ina-reconnect</h3>` +
-            `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (scan QR code kwenye server logs ikiwa inaonekana) na subiri sekunde chache kisha ujaribu tena.</p>` +
+            `<p style="font-size:14px;color:#555;">Kwa sasa WhatsApp bot haijawa tayari kutuma OTP. Hakikisha bot imeunganishwa (angalia Pairing Code kwenye server logs) na subiri sekunde chache kisha ujaribu tena.</p>` +
             `<p style="font-size:12px;color:#777;">Status: ready=${isBotSocketReady()}, reconnecting=${isReconnecting}, lastCode=${lastDisconnectCode || 'none'}</p>` +
             `<a href="/forgot-password" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;">Jaribu Tena</a>` +
             `</div>`
@@ -3390,6 +3509,13 @@ app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) 
       );
     }
 
+    const targetJid = await resolveWhatsappJid(winga.phone || cleanedPhone);
+    if (!targetJid) {
+      return res.send(
+        '❌ Imeshindwa kupata anuani ya WhatsApp ya namba hii. <br><a href="/forgot-password">Jaribu Tena</a>'
+      );
+    }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await db('password_resets').where({ phone: winga.phone }).del();
     await db('password_resets').insert({
@@ -3399,7 +3525,6 @@ app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) 
     });
     console.log(`[OTP] OTP imehifadhiwa kwenye DB kwa Winga #${winga.id} (${winga.name} - ${winga.phone})`);
 
-    const targetJid = `${cleanedPhone}@s.whatsapp.net`;
     const sendResult = await sock.sendMessage(targetJid, {
       text:
         `🔑 *KODI YA KUBADILISHA NENOSIRI (PASSWORD RESET)*\n` +
@@ -3459,7 +3584,7 @@ app.post('/forgot-password', rateLimitAuth(8, 15 * 60 * 1000), async (req, res) 
     res
       .status(500)
       .send(
-        `❌ Hitilafu wakati wa kutuma OTP: ${escapeHtml(err.message)} <br><a href="/forgot-password">Jaribu Tena</a>`
+        '❌ Hitilafu wakati wa kutuma OTP. Tafadhali jaribu tena. <br><a href="/forgot-password">Jaribu Tena</a>'
       );
   }
 });
@@ -3777,7 +3902,7 @@ app.post('/superadmin/winga/reset-password', requireSuperAdmin, async (req, res)
   try {
     const wingaId = parseInt(req.body.wingaId, 10);
     const newPassword = (req.body.newPassword || '').trim();
-    if (!wingaId || newPassword.length < 6) {
+    if (Number.isNaN(wingaId) || newPassword.length < 6) {
       return res.redirect('/superadmin?reset=short');
     }
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -3791,25 +3916,30 @@ app.post('/superadmin/winga/reset-password', requireSuperAdmin, async (req, res)
 
 app.post('/superadmin/product/delete', requireSuperAdmin, async (req, res) => {
   try {
-    await db('products').where({ id: parseInt(req.body.id, 10) }).del();
+    const pid = parseInt(req.body.id, 10);
+    if (!Number.isNaN(pid)) {
+      await db('products').where({ id: pid }).del();
+    }
   } catch (err) {}
   res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/status', requireSuperAdmin, async (req, res) => {
   try {
-    await db('wingas')
-      .where({ id: parseInt(req.body.wingaId, 10) })
-      .update({ status: req.body.status });
+    const wid = parseInt(req.body.wingaId, 10);
+    const nextStatus = String(req.body.status || '').trim();
+    if (!Number.isNaN(wid) && ['active', 'suspended'].includes(nextStatus)) {
+      await db('wingas').where({ id: wid }).update({ status: nextStatus });
+    }
   } catch (err) {}
   res.redirect('/superadmin');
 });
 
 app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
   try {
-    const winga = await db('wingas')
-      .where({ id: parseInt(req.body.wingaId, 10) })
-      .first();
+    const wid = parseInt(req.body.wingaId, 10);
+    if (Number.isNaN(wid)) return res.redirect('/superadmin');
+    const winga = await db('wingas').where({ id: wid }).first();
     if (winga) {
       const baseDate =
         winga.expiryDate && new Date(winga.expiryDate) > new Date()
@@ -3817,7 +3947,7 @@ app.post('/superadmin/winga/extend', requireSuperAdmin, async (req, res) => {
           : new Date();
       baseDate.setDate(baseDate.getDate() + 30);
       await db('wingas')
-        .where({ id: parseInt(req.body.wingaId, 10) })
+        .where({ id: wid })
         .update({ expiryDate: baseDate, status: 'active' });
     }
   } catch (err) {}
@@ -3838,7 +3968,7 @@ app.post('/superadmin/winga/sms', requireSuperAdmin, async (req, res) => {
 
 app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
   try {
-    const name = (req.body.name || '').trim();
+    const name = (req.body.name || '').trim().slice(0, 120);
     const phone = (req.body.phone || '').trim();
     const rawPassword = (req.body.password || '123456').trim();
     const fullLocation =
@@ -3849,7 +3979,7 @@ app.post('/superadmin/add-winga', requireSuperAdmin, async (req, res) => {
         req.body.street,
         req.body.customStreet
       ) || 'Tanzania';
-    if (!name || !phone) return res.redirect('/superadmin');
+    if (!name || !phone || rawPassword.length < 6) return res.redirect('/superadmin');
 
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
     const expiry = new Date();
@@ -3880,7 +4010,7 @@ cron.schedule('0 8 * * *', async () => {
       if (!w.expiryDate) continue;
       const expiry = new Date(w.expiryDate);
       const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-      const chatId = buildDirectJid(w.phone);
+      const chatId = await resolveWhatsappJid(w.phone);
       if (!chatId) continue;
 
       if (daysLeft <= 0 && w.status === 'active') {

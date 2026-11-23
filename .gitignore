@@ -3,4 +3,5 @@ node_modules/
 auth_info_baileys/
 .wwebjs_auth/
 uploads/
-*.log
+*.log.env
+auth_info_baileys/

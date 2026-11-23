@@ -15,12 +15,12 @@ function formatTzPhone(phone) {
 }
 
 async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
-  const apiKey = process.env.BEEM_API_KEY;
-  const secretKey = process.env.BEEM_SECRET_KEY;
-  const senderId = process.env.BEEM_SENDER_ID || 'MAPINDA';
+  const apiKey = (process.env.BEEM_API_KEY || '').trim();
+  const secretKey = (process.env.BEEM_SECRET_KEY || '').trim();
+  const senderId = (process.env.BEEM_SENDER_ID || 'MAPINDA').trim();
 
   if (!apiKey || !secretKey) {
-    console.warn('[SMS] BEEM_API_KEY au BEEM_SECRET_KEY haijawekwa kwenye .env');
+    console.warn('[SMS] BEEM_API_KEY au BEEM_SECRET_KEY haijawekwa kwenye mazingira.');
     return { ok: false, reason: 'missing_keys' };
   }
 
@@ -30,7 +30,10 @@ async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
     return { ok: false, reason: 'invalid_phone' };
   }
 
-  const message = `AgizaSmart: Habari ${sellerName || 'Muuzaji'}, una oda mpya #${orderId} ya TSh ${Number(totalAmount || 0).toLocaleString()}. Ingia kwenye dashboard kuikagua.`;
+  const safeOrderId = Number(orderId) || 0;
+  const safeAmount = Number(totalAmount || 0).toLocaleString();
+  const safeSeller = String(sellerName || 'Muuzaji').replace(/[\r\n]+/g, ' ').trim();
+  const message = `AgizaSmart: Habari ${safeSeller}, una oda mpya #${safeOrderId} ya TSh ${safeAmount}. Ingia kwenye dashboard kuikagua.`;
 
   const auth = 'Basic ' + Buffer.from(`${apiKey}:${secretKey}`).toString('base64');
 
@@ -42,20 +45,20 @@ async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
     recipients: [
       {
         recipient_id: 1,
-        dest_addr: destAddr,
-      },
-    ],
+        dest_addr: destAddr
+      }
+    ]
   };
 
-  console.log(`[SMS] Inatuma SMS kwenda ${destAddr} (Order #${orderId}, Sender: ${senderId})...`);
+  console.log(`[SMS] Inatuma SMS kwenda ${destAddr} (Order #${safeOrderId}, Sender: ${senderId})...`);
 
   try {
     const res = await axios.post(BEEM_SMS_URL, payload, {
       headers: {
         Authorization: auth,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
-      timeout: 10000,
+      timeout: 12000
     });
     console.log('[SMS] Jibu la Beem:', JSON.stringify(res.data));
     return { ok: true, data: res.data };
@@ -71,12 +74,12 @@ async function sendSellerOrderSms({ phone, sellerName, orderId, totalAmount }) {
       reason: 'api_error',
       status,
       providerData,
-      error: err.message,
+      error: err.message
     };
   }
 }
 
 module.exports = {
   formatTzPhone,
-  sendSellerOrderSms,
+  sendSellerOrderSms
 };
